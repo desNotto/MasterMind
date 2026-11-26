@@ -8,27 +8,23 @@ const juce::Identifier stateType { "MasterMindState" };
 const juce::Identifier stateVersionKey { "stateVersion" };
 constexpr int stateVersion = 1;
 
-juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
-{
-    // M0 has no parameters. Parameter IDs are defined and frozen in M1.
-    return {};
-}
 } // namespace
 
 MasterMindProcessor::MasterMindProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      parameters (*this, nullptr, stateType, createParameterLayout())
+      parameters (*this, nullptr, stateType, mm::params::createLayout()),
+      chain (parameters)
 {
     parameters.state.setProperty (stateVersionKey, stateVersion, nullptr);
 }
 
 void MasterMindProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    chain.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
+    chain.prepare (sampleRate, samplesPerBlock, isNonRealtime());
     loadMeter.prepare (sampleRate);
-    setLatencySamples (0);
+    setLatencySamples (chain.latencySamples());
 }
 
 void MasterMindProcessor::releaseResources()

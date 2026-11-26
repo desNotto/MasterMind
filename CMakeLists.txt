@@ -85,15 +85,25 @@ set(MM_COMMON_DEFINITIONS
 # INTERFACE (source) library compiled into each consumer, because JUCE
 # modules are source modules (see docs/DECISIONS.md, D-004).
 # ---------------------------------------------------------------------------
-set(MM_CORE_SOURCES
-    ${CMAKE_SOURCE_DIR}/Source/dsp/MasterChain.cpp
-    ${CMAKE_SOURCE_DIR}/Source/state/GlobalSettings.cpp)
+file(GLOB MM_CORE_SOURCES CONFIGURE_DEPENDS
+    ${CMAKE_SOURCE_DIR}/Source/dsp/*.cpp
+    ${CMAKE_SOURCE_DIR}/Source/analysis/*.cpp
+    ${CMAKE_SOURCE_DIR}/Source/state/*.cpp
+    ${CMAKE_SOURCE_DIR}/Source/monitoring/*.cpp
+    ${CMAKE_SOURCE_DIR}/Source/reference/*.cpp
+    ${CMAKE_SOURCE_DIR}/Source/presets/*.cpp
+    ${CMAKE_SOURCE_DIR}/Source/album/*.cpp)
 mm_strict_sources(${MM_CORE_SOURCES})
 
 add_library(mastermind_core INTERFACE)
 target_sources(mastermind_core INTERFACE ${MM_CORE_SOURCES})
 target_include_directories(mastermind_core INTERFACE ${CMAKE_SOURCE_DIR}/Source ${MM_GENERATED_DIR})
-target_link_libraries(mastermind_core INTERFACE juce::juce_core juce::juce_audio_basics)
+target_link_libraries(mastermind_core INTERFACE
+    juce::juce_core
+    juce::juce_audio_basics
+    juce::juce_audio_formats
+    juce::juce_audio_processors
+    juce::juce_dsp)
 
 # ---------------------------------------------------------------------------
 # The plugin.
@@ -114,9 +124,10 @@ juce_add_plugin(${MM_PRODUCT_NAME}
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     COPY_PLUGIN_AFTER_BUILD FALSE)
 
+file(GLOB MM_UI_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/Source/ui/*.cpp)
 set(MM_PLUGIN_SOURCES
     ${CMAKE_SOURCE_DIR}/Source/PluginProcessor.cpp
-    ${CMAKE_SOURCE_DIR}/Source/ui/PluginEditor.cpp)
+    ${MM_UI_SOURCES})
 mm_strict_sources(${MM_PLUGIN_SOURCES})
 
 target_sources(${MM_PRODUCT_NAME} PRIVATE ${MM_PLUGIN_SOURCES})
@@ -147,7 +158,7 @@ if(MM_BUILD_TESTS)
 
     # Unit tests of the GUI-free core (Catch2).
     juce_add_console_app(MasterMindTests PRODUCT_NAME "MasterMindTests")
-    set(MM_TEST_SOURCES ${CMAKE_SOURCE_DIR}/tests/CoreTests.cpp)
+    file(GLOB MM_TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/tests/*Tests.cpp)
     mm_strict_sources(${MM_TEST_SOURCES})
     target_sources(MasterMindTests PRIVATE ${MM_TEST_SOURCES})
     target_compile_definitions(MasterMindTests PRIVATE ${MM_COMMON_DEFINITIONS})

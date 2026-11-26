@@ -1,31 +1,116 @@
 #pragma once
 
+#include "dsp/BusComp.h"
+#include "dsp/ClipLimit.h"
+#include "dsp/DynamicEq.h"
+#include "dsp/InputOutput.h"
+#include "dsp/LowEnd.h"
+#include "dsp/Multiband.h"
+#include "dsp/SatStereo.h"
+#include "state/Parameters.h"
+
 #include <juce_audio_basics/juce_audio_basics.h>
+
+#include <array>
+#include <memory>
 
 namespace mm::dsp
 {
-/** Returns true if any sample in the buffer is NaN or infinite.
-    Works on the bit pattern, so it stays correct under fast-math flags. */
+/** True if any sample in the buffer is NaN or +-Inf (checked through the bit pattern, so it works
+    with fast-math compiler options). */
 bool containsNonFinite (const juce::AudioBuffer<float>& buffer) noexcept;
 
-/** The processing chain (spec section 4). In M0 it is a passthrough with
-    the NaN/Inf input guard. Real-time safe: no allocation, no locks. */
+/** The fixed-order processing chain of section 4. Every module has a latency-compensated bypass,
+    so the total latency depends only on structural settings, never on module on/off. */
 class MasterChain
 {
 public:
-    void prepare (double sampleRate, int maximumBlockSize, int numChannels);
-    void reset() noexcept;
+    enum ModuleId
+    {
+        input,
+        eq,
+        multiband,
+        lowEnd,
+        busComp,
+        saturation,
+        stereo,
+        clipper,
+        limiter,
+        output,
+        numModules
+    };
 
-    /** Processes the buffer in place. If the input contains NaN or Inf, the
-        block is replaced by silence, all states are reset and false is
-        returned. Otherwise the audio passes unchanged and true is returned. */
+    explicit MasterChain (juce::AudioProcessorValueTreeState& state);
+    ~MasterChain();
+
+    void prepare (double sampleRate, int maxBlockSize, bool offline);
+    void reset();
+
+    /** Processes in place. Returns false if the input contained NaN or Inf; the buffer is then
+        silenced and the internal state reset. Real-time safe. */
     bool process (juce::AudioBuffer<float>& buffer) noexcept;
 
-    double getSampleRate() const noexcept { return sampleRate; }
+    /** Total latency for the current structural settings. */
+    int latencySamples() const noexcept;
+
+    /** Rebuilds linear-phase kernels when needed. Worker thread only (allocates). */
+    void updateLinearPhase();
+
+    bool isModuleOn (int id) const noexcept { return slots[(size_t) id].on; }
+
+    const DynamicEq& getEq() const noexcept { return eqModule; }
+    const Multiband& getMultiband() const noexcept { return mbModule; }
+    const LowEnd& getLowEnd() const noexcept { return lowEndModule; }
+    const BusComp& getBusComp() const noexcept { return busModule; }
+    const StereoStage& getStereo() const noexcept { return stereoModule; }
+    const Clipper& getClipper() const noexcept { return clipModule; }
+    const Limiter& getLimiter() const noexcept { return limModule; }
+    const InputStage& getInput() const noexcept { return inputModule; }
+
+    double getSampleRate() const noexcept { return fs; }
+
+    /** Settings snapshots read from the parameters (any thread). */
+    DynamicEq::Settings eqSnapshot() const;
+    Multiband::Settings multibandSnapshot() const;
 
 private:
-    double sampleRate = 44100.0;
-    int maxBlockSize = 0;
-    int channels = 2;
+    struct Slot
+    {
+        Module* module = nullptr;
+        std::atomic<float>* onParam = nullptr;
+        DelayLine bypass;
+        bool on = false;
+        double fade = 0.0; // 0 = dry (bypassed), 1 = processed
+    };
+
+    void readSettings() noexcept;
+    float p (const char* id) const noexcept;
+    float p (const juce::String& id) const noexcept;
+
+    juce::AudioProcessorValueTreeState& apvts;
+    params::Raw raw;
+    struct ParamPtrs;
+    std::unique_ptr<ParamPtrs> ptrs;
+
+    InputStage inputModule;
+    DynamicEq eqModule;
+    Multiband mbModule;
+    LowEnd lowEndModule;
+    BusComp busModule;
+    Saturation satModule;
+    StereoStage stereoModule;
+    Clipper clipModule;
+    Limiter limModule;
+    OutputStage outputModule;
+
+    std::array<Slot, numModules> slots;
+    juce::AudioBuffer<float> dry;
+    double fs = 48000.0;
+    int maxBlock = 512;
+    bool offlineMode = false;
+    double fadeStep = 0.001;
+
+    juce::CriticalSection buildLock;
+    juce::String lastEqKey, lastMbKey;
 };
 } // namespace mm::dsp

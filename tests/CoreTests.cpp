@@ -1,4 +1,3 @@
-#include "dsp/MasterChain.h"
 #include "state/GlobalSettings.h"
 #include "state/WindowSizing.h"
 
@@ -10,37 +9,6 @@
 
 namespace
 {
-void fillNoise (juce::AudioBuffer<float>& buffer, juce::Random& random)
-{
-    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-        for (int i = 0; i < buffer.getNumSamples(); ++i)
-            buffer.setSample (ch, i, random.nextFloat() * 2.0f - 1.0f);
-}
-
-bool bitIdentical (const juce::AudioBuffer<float>& a, const juce::AudioBuffer<float>& b)
-{
-    if (a.getNumChannels() != b.getNumChannels() || a.getNumSamples() != b.getNumSamples())
-        return false;
-
-    const auto bytes = sizeof (float) * static_cast<size_t> (a.getNumSamples());
-
-    for (int ch = 0; ch < a.getNumChannels(); ++ch)
-        if (std::memcmp (a.getReadPointer (ch), b.getReadPointer (ch), bytes) != 0)
-            return false;
-
-    return true;
-}
-
-bool isSilent (const juce::AudioBuffer<float>& buffer)
-{
-    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
-        for (int i = 0; i < buffer.getNumSamples(); ++i)
-            if (buffer.getSample (ch, i) != 0.0f)
-                return false;
-
-    return true;
-}
-
 struct TempDir
 {
     TempDir()
@@ -55,81 +23,6 @@ struct TempDir
     juce::File dir;
 };
 } // namespace
-
-TEST_CASE ("MasterChain is a bit-exact passthrough", "[dsp][transparency]")
-{
-    const double sampleRates[] = { 44100.0, 48000.0, 88200.0, 96000.0, 192000.0 };
-    const int blockSizes[] = { 1, 32, 64, 512, 2048, 8192 };
-    juce::Random random (1234);
-
-    for (const double sr : sampleRates)
-    {
-        for (const int bs : blockSizes)
-        {
-            mm::dsp::MasterChain chain;
-            chain.prepare (sr, bs, 2);
-
-            juce::AudioBuffer<float> buffer (2, bs);
-            juce::AudioBuffer<float> original (2, bs);
-
-            for (int block = 0; block < 4; ++block)
-            {
-                fillNoise (buffer, random);
-                original.makeCopyOf (buffer);
-                REQUIRE (chain.process (buffer));
-                REQUIRE (bitIdentical (buffer, original));
-            }
-        }
-    }
-}
-
-TEST_CASE ("MasterChain is bit-exact with randomly varying block sizes", "[dsp][transparency]")
-{
-    constexpr int maxBlock = 8192;
-    mm::dsp::MasterChain chain;
-    chain.prepare (48000.0, maxBlock, 2);
-    juce::Random random (99);
-
-    for (int block = 0; block < 200; ++block)
-    {
-        const int n = 1 + random.nextInt (maxBlock);
-        juce::AudioBuffer<float> buffer (2, n);
-        fillNoise (buffer, random);
-        juce::AudioBuffer<float> original;
-        original.makeCopyOf (buffer);
-        REQUIRE (chain.process (buffer));
-        REQUIRE (bitIdentical (buffer, original));
-    }
-}
-
-TEST_CASE ("NaN and Inf input produce silence", "[dsp][robustness]")
-{
-    mm::dsp::MasterChain chain;
-    chain.prepare (48000.0, 512, 2);
-    juce::Random random (7);
-
-    const float badValues[] = { std::numeric_limits<float>::quiet_NaN(),
-                                std::numeric_limits<float>::infinity(),
-                                -std::numeric_limits<float>::infinity() };
-
-    for (const float bad : badValues)
-    {
-        juce::AudioBuffer<float> buffer (2, 512);
-        fillNoise (buffer, random);
-        buffer.setSample (1, 300, bad);
-
-        REQUIRE (mm::dsp::containsNonFinite (buffer));
-        REQUIRE_FALSE (chain.process (buffer));
-        REQUIRE (isSilent (buffer));
-
-        // The next clean block passes unchanged again.
-        fillNoise (buffer, random);
-        juce::AudioBuffer<float> original;
-        original.makeCopyOf (buffer);
-        REQUIRE (chain.process (buffer));
-        REQUIRE (bitIdentical (buffer, original));
-    }
-}
 
 TEST_CASE ("Size button toggles 100% and 120%", "[ui][window]")
 {

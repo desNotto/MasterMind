@@ -2,6 +2,7 @@
 
 #include "dsp/LoadMeter.h"
 #include "dsp/MasterChain.h"
+#include "state/Parameters.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
