@@ -139,7 +139,7 @@ private:
 };
 
 /** Draws a panel header ("ph") with a title and optional subtitle; returns the remaining area. */
-juce::Rectangle<int> paintPanelHeader (juce::Graphics& g, juce::Rectangle<int> panel, const juce::String& title, const juce::String& sub = {});
+juce::Rectangle<int> paintPanelHeader (juce::Graphics& g, juce::Rectangle<int> panel, const juce::String& title, const juce::String& sub = {}, int reserveRight = 0);
 
 /** Rich tooltip bubble (title, values, labelled sections, footer). */
 class TipBubble final : public juce::Component

@@ -6,7 +6,7 @@ cmake_minimum_required(VERSION 3.22)
 # ---------------------------------------------------------------------------
 set(MM_PRODUCT_NAME "MasterMind" CACHE STRING "Product name used for the plugin, files and folders")
 set(MM_COMPANY_NAME "desNotto")
-set(MM_MILESTONE 0)
+set(MM_MILESTONE 7)
 set(MM_BUILD_NUMBER 0 CACHE STRING "Build number (GitHub Actions run number)")
 set(MM_GIT_HASH "" CACHE STRING "Short git commit hash (detected automatically when empty)")
 set(MM_VERSION "0.${MM_MILESTONE}.${MM_BUILD_NUMBER}")

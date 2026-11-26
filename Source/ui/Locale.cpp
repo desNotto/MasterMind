@@ -73,6 +73,17 @@ const std::map<juce::String, juce::String>& russianTable()
         add ("3\xe2\x80\x93" "8 kHz fizz above target", "«Песок» 3–8 kHz выше цели");
         // tab bar and footer
         add ("Analyse", "Анализ");
+        add ("Target: Streaming ref", "Цель: стриминг");
+        add ("LUFS reference (info only)", "LUFS — ориентир (справка)");
+        add ("mono below", "моно ниже");
+        add ("Balance L/R", "Баланс L/R");
+        add ("Below ceiling", "Ниже Ceiling");
+        add ("Above ceiling", "Выше Ceiling");
+        add ("Louder than", "Громче");
+        add ("Quieter than", "Тише");
+        add ("(info only)", "(справка)");
+        add ("Corr", "Корр.");
+        add ("Mono loss##table", "Потеря");
         add ("Reset on play", "Сброс при старте");
         add ("samples", "сэмплов");
         add ("Latency", "Задержка");

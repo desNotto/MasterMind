@@ -247,3 +247,26 @@ TEST_CASE ("Album file survives reopening and a concurrent write", "[album]")
     CHECK_FALSE (d.open (file, err));
     CHECK (err.isNotEmpty());
 }
+
+TEST_CASE ("Generate docs/PARAMETERS.md", "[.docs]")
+{
+    const auto path = juce::SystemStats::getEnvironmentVariable ("MM_PARAMS_MD", "");
+    REQUIRE (path.isNotEmpty());
+    juce::String md;
+    md << "# MasterMind parameters\n\n"
+       << "Generated from `Source/state/Parameters.cpp`. The IDs are frozen since M1 (spec section 9): never rename or remove an ID and never change the meaning of a choice index.\n\n"
+       << "| ID | Name | Range or choices | Default | Automatable |\n| --- | --- | --- | --- | --- |\n";
+    for (const auto& s : mm::params::all())
+    {
+        juce::String range;
+        if (s.kind == mm::params::Kind::toggle)
+            range = "Off / On";
+        else if (s.kind == mm::params::Kind::choice)
+            range = s.choices.joinIntoString (", ");
+        else
+            range = mm::params::formatValue (s, s.minValue) + " to " + mm::params::formatValue (s, s.maxValue);
+        md << "| `" << s.id << "` | " << s.name << " | " << range << " | " << mm::params::formatValue (s, s.defaultValue) << " | "
+           << (s.automatable ? "yes" : "no") << " |\n";
+    }
+    REQUIRE (juce::File (path).replaceWithText (md));
+}

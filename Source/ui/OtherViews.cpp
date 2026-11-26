@@ -17,10 +17,10 @@ juce::Colour heat (float t)
     return stops[i].interpolatedWith (stops[i + 1], t - (float) i);
 }
 
-void sectionTitle (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& t, const juce::String& sub = {})
+void sectionTitle (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& t, const juce::String& sub = {}, int reserve = 0)
 {
     drawPanel (g, r.toFloat());
-    paintPanelHeader (g, r, t, sub);
+    paintPanelHeader (g, r, t, sub, reserve);
 }
 } // namespace
 
@@ -224,7 +224,7 @@ void SpectrogramView::mouseDown (const juce::MouseEvent& e)
 void SpectrogramView::paint (juce::Graphics& g)
 {
     auto top = getLocalBounds().withHeight (plot.getBottom() + 18);
-    sectionTitle (g, top, tr ("Spectrogram"), tr ("mid signal, log frequency"));
+    sectionTitle (g, top, tr ("Spectrogram"), tr ("mid signal, log frequency"), 320);
     if (image.isValid())
         g.drawImage (image, plot.toFloat(), juce::RectanglePlacement::stretchToFit);
     g.setColour (col::text2);

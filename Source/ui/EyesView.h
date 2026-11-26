@@ -98,5 +98,6 @@ private:
 /** Shared drawing helpers. */
 void drawVectorscope (juce::Graphics& g, juce::Rectangle<float> r, const std::vector<std::pair<float, float>>& pts);
 void drawCorrelation (juce::Graphics& g, juce::Rectangle<float> r, double corr);
+juce::String trDetail (const juce::String& detail);
 const analysis::TapView& viewTap (const Context& c);
 } // namespace mm::ui

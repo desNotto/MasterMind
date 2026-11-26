@@ -74,3 +74,55 @@ Writing rules applied to the Russian text: one idea per sentence, at most 20 wor
 Mockup: `docs/mockups/m1-main-window-v2-2026-11-26/` (static PNGs plus an interactive `mockup.html`).
 
 Mockup v4 (2026-11-26) extends the same tooltips to every control the user can operate, not only knobs: preset controls, Bypass and Match, Monitor and System selectors, reference slots and A/B, the size button, all tabs, analysis controls, spectrum view controls, EQ nodes on the spectrum, band buttons, module headers (bypass LED), polarity buttons, mode switches and drop-down lists. Control tooltips use the parts "Что делает" and "Совет" or "Внимание", plus a gesture line where the control has one. Readouts and graphs are not controls and are not covered; traffic lights keep their own tooltips from section 8. Mockup: `docs/mockups/m1-main-window-v4-2026-11-26/`.
+
+## D-012 Whole plugin in one pass (2026-11-26)
+
+After M0 passed in REAPER and mockup v4 was approved, the user asked to build the whole plugin (M1 to M7) without stopping for REAPER tests or approvals between milestones, and to test the finished product once. Every milestone's automated tests still run in CI. The REAPER test happens once, with a single Russian checklist at the end. New tabs follow the visual language of the approved mockup v4 without separate mockups. M0 result: REAPER loads the flat single-file `.vst3` (D-009 confirmed).
+
+## D-013 DC blocker only with the subsonic filter
+
+The spec asks for an always-on DC blocker and also for a bit-exact default state. Both cannot hold at once. The 5 Hz DC blocker therefore runs together with the subsonic filter (`hpf_on`). Input trim at 0 dB and Output gain at 0 dB skip the multiplication, so the default state is bit-exact.
+
+## D-014 Constant latency with latency-compensated bypass
+
+Every module keeps its latency when it is bypassed (its bypass path is a delay line of the same length), and module on/off crossfades over 20 ms. The reported latency changes only with structural settings: Quality, Limiter lookahead (non-automatable), EQ linear phase and Multiband linear-phase crossovers. With the defaults it is 270 samples at 48 kHz (oversampling filters and the 2 ms limiter lookahead). The default state is a bit-exact copy of the input delayed by exactly that latency; the binary test checks this through the VST3 interface.
+
+## D-015 True-peak interpolation
+
+The BS.1770 example filter is replaced by Kaiser-windowed sinc interpolators that are centred on an input sample, so phase 0 reproduces the samples exactly. Meters use 4x with 16 taps per phase. The limiter uses 8x with 96 taps per phase, aims 0.15 dB below the ceiling and ends with a sample clamp at the ceiling. The acceptance test measures with a separate 8x, 256-tap meter and passes at ceiling + 0.05 dB for pink noise, a sine sweep and a synthetic kick with +24 dB drive.
+
+## D-016 Default tonal target and spectrum tilt
+
+Without references the tonal-balance target is a spectrum whose FFT-bin level falls 4.5 dB per octave, the same slope that the default spectrum tilt makes flat (5.1). With references the target and corridor come from the reference set (7.2). The spectrum shows smoothed band power converted to a density slope, so tilt 3 dB/oct makes pink noise flat and 4.5 dB/oct makes a typical mix flat, as the spec intends. Smoothing interpolates fractional FFT bins, which keeps the curve smooth below 100 Hz.
+
+## D-017 Linear phase
+
+Linear-phase EQ builds one FIR per routing (L/R and M/S combined into four kernels) from the static band curves; dynamic bands add their dynamic part with minimum-phase filters on top. Linear-phase multiband uses complementary FIR low-pass kernels whose differences form the bands, so the bands sum exactly to a delayed input. Kernels are built on a worker thread, never on the audio thread.
+
+## D-018 Low-End Translator without oversampling
+
+The translator shapes a 30 to 90 Hz band with 2nd- and 3rd-order Chebyshev polynomials. Its highest generated harmonic is 270 Hz, far below Nyquist, so oversampling would change nothing; it is omitted.
+
+## D-019 Auto quality
+
+Auto uses 2x/4x (saturation/clipper) in real time and 4x/8x offline. Both oversamplers are prepared and the shorter path is padded, so the latency is the same in real time and in an offline render.
+
+## D-020 Font
+
+The mockup names Inter with Segoe UI as fallback. The plugin uses Segoe UI (part of Windows), so no font file has to be embedded; the look and metrics are close to the approved mockup.
+
+## D-021 Reference memory
+
+Only the selected reference is decoded into memory for playback; analysis results of all slots come from the on-disk cache. Six loaded references stay well under the 300 MB target.
+
+## D-022 Interface details beyond the mockup
+
+The mockup shows the key controls of each module. Every other parameter is reachable through a module detail panel (double-click a module name) with generic controls and generic tooltips. Also added: a Match EQ panel in the spectrum header, a reference player strip in the tab bar while B is active, a medium layout and a compact top bar for narrow windows, band listen buttons on the Low-End tab, and the harshness (5.7), dynamics per band (5.8) and limiter damage (5.9) panels under the spectrogram. Turning Rotate or Translator above zero switches that sub-feature on; touching a Release knob turns Auto release off.
+
+## D-023 Localisation scope
+
+The options menu (gear in the footer) switches English and Russian. Headings, status texts and explanations are translated. Control, module and tab names stay English because the approved Russian tooltips refer to them by these names, and the spec keeps technical terms in English.
+
+## D-024 Reset on play and chain bypass
+
+Analysis resets on every transport start while "Reset on play" is on (the user can switch it off to measure a song in parts). The chain Bypass with Match is a monitoring feature (6.4): it is never saved and never affects an offline render.

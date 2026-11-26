@@ -32,6 +32,14 @@ jobs:
       - name: Unit tests and binary null test
         run: ctest --test-dir build -C Release --output-on-failure
 
+      - name: Upload UI snapshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-snapshots
+          path: build/ui-snapshots
+          if-no-files-found: ignore
+
       - name: Download pluginval
         shell: pwsh
         run: |

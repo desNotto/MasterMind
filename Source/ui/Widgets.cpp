@@ -447,7 +447,7 @@ void Led::paint (juce::Graphics& g)
 
 void Led::mouseDown (const juce::MouseEvent&) { attachment->setValueAsCompleteGesture (on ? 0.0f : 1.0f); }
 
-juce::Rectangle<int> paintPanelHeader (juce::Graphics& g, juce::Rectangle<int> panel, const juce::String& title, const juce::String& sub)
+juce::Rectangle<int> paintPanelHeader (juce::Graphics& g, juce::Rectangle<int> panel, const juce::String& title, const juce::String& sub, int reserveRight)
 {
     auto head = panel.removeFromTop (32);
     g.setColour (col::line);
@@ -461,7 +461,7 @@ juce::Rectangle<int> paintPanelHeader (juce::Graphics& g, juce::Rectangle<int> p
     {
         g.setColour (col::text3);
         g.setFont (font (12.5f));
-        g.drawText (sub, t, juce::Justification::centredLeft, true);
+        g.drawText (sub, t.withTrimmedRight (reserveRight), juce::Justification::centredLeft, true);
     }
     return panel;
 }
