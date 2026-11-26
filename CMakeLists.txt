@@ -151,6 +151,20 @@ add_custom_command(TARGET ${MM_PRODUCT_NAME}_VST3 POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${MM_PRODUCT_NAME}_VST3> ${MM_DIST_DIR}/${MM_PRODUCT_NAME}.vst3
     COMMENT "Creating flat single-file ${MM_PRODUCT_NAME}.vst3")
 
+# Offline album analyzer (spec 7.5, optional): a small standalone application.
+juce_add_gui_app(MasterMindAlbumAnalyzer PRODUCT_NAME "MasterMind Album Analyzer")
+set(MM_ANALYZER_SOURCES ${CMAKE_SOURCE_DIR}/tools/AlbumAnalyzer/Main.cpp)
+mm_strict_sources(${MM_ANALYZER_SOURCES})
+target_sources(MasterMindAlbumAnalyzer PRIVATE ${MM_ANALYZER_SOURCES})
+target_compile_definitions(MasterMindAlbumAnalyzer PRIVATE ${MM_COMMON_DEFINITIONS} JUCE_USE_WIN_WEBVIEW2=0)
+target_link_libraries(MasterMindAlbumAnalyzer PRIVATE
+    mastermind_core
+    juce::juce_gui_basics
+    juce::juce_recommended_config_flags)
+add_custom_command(TARGET MasterMindAlbumAnalyzer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${MM_DIST_DIR}
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:MasterMindAlbumAnalyzer> "${MM_DIST_DIR}/MasterMind Album Analyzer.exe")
+
 # ---------------------------------------------------------------------------
 # Tests.
 # ---------------------------------------------------------------------------

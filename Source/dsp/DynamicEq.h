@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dsp/Module.h"
+#include "dsp/Resonance.h"
 
 #include <juce_dsp/juce_dsp.h>
 
@@ -49,7 +50,9 @@ public:
     void prepare (const Context& ctx) override;
     void reset() override;
     void process (float* left, float* right, int numSamples) noexcept override;
-    int latency() const noexcept override { return settings.linearPhase ? firLength / 2 : 0; }
+    int latency() const noexcept override { return (settings.linearPhase ? firLength / 2 : 0) + resonance.latency(); }
+
+    ResonanceSuppressor resonance;
 
     /** Effective (dynamic) gain of each band in dB for the UI. */
     float effectiveGainDb (int band) const noexcept { return meters[(size_t) band].get(); }

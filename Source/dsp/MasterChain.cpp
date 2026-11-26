@@ -25,7 +25,7 @@ struct ParamPtrsImpl
 {
     using A = std::atomic<float>*;
     A quality, inTrim, polL, polR, hpfOn, hpfFreq, hpfSlope;
-    A eqPhase;
+    A eqPhase, rsOn, rsLow, rsHigh, rsDepth, rsSharp, rsSpeed, rsMix, rsDelta;
     struct EqBand { A on, type, slope, freq, gain, q, place, dyn, thr, range, mode, att, rel; };
     std::array<EqBand, 10> eqb {};
     A mbType;
@@ -55,6 +55,14 @@ ParamPtrsImpl resolve (const params::Raw& r)
     p.hpfFreq = r.get ("hpf_freq");
     p.hpfSlope = r.get ("hpf_slope");
     p.eqPhase = r.get ("eq_phase");
+    p.rsOn = r.get ("rs_on");
+    p.rsLow = r.get ("rs_low");
+    p.rsHigh = r.get ("rs_high");
+    p.rsDepth = r.get ("rs_depth");
+    p.rsSharp = r.get ("rs_sharp");
+    p.rsSpeed = r.get ("rs_speed");
+    p.rsMix = r.get ("rs_mix");
+    p.rsDelta = r.get ("rs_delta");
     for (int b = 1; b <= 10; ++b)
     {
         auto& e = p.eqb[(size_t) b - 1];
@@ -266,6 +274,15 @@ void MasterChain::readSettings() noexcept
     in.hpfSlope = iv (q.hpfSlope);
 
     eqModule.settings = eqFrom (q);
+    auto& rs = eqModule.resonance.settings;
+    rs.on = bv (q.rsOn);
+    rs.lowHz = std::min (v (q.rsLow), v (q.rsHigh));
+    rs.highHz = std::max (v (q.rsLow), v (q.rsHigh));
+    rs.depthDb = v (q.rsDepth);
+    rs.sharpness = v (q.rsSharp) * 0.01f;
+    rs.speed = v (q.rsSpeed) * 0.01f;
+    rs.mix = v (q.rsMix) * 0.01f;
+    rs.delta = bv (q.rsDelta);
     mbModule.settings = mbFrom (q);
 
     auto& le = lowEndModule.settings;

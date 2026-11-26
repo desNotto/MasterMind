@@ -241,7 +241,11 @@ ModuleStrip::ModuleStrip (Context& context) : ctx (context)
         c->knob (params::eq (5, "gain"), "Gain", "eq.gain", col::yellow, true, 1);
         c->knob (params::eq (5, "q"), "Q", "eq.q", col::yellow, false, 1);
         c->knob (params::eq (5, "thr"), "Thresh", "eq.thr", col::yellow, false, 1);
-        c->rightText = [this] { return ctx.param ("eq_phase") >= 0.5f ? juce::String ("Linear phase") : juce::String ("Min phase"); };
+        c->rightText = [this]
+        {
+            const auto phase = ctx.param ("eq_phase") >= 0.5f ? juce::String ("Linear phase") : juce::String ("Min phase");
+            return ctx.param ("rs_on") >= 0.5f ? "Res " + fmtMinus (ctx.proc.getChain().getEq().resonance.maxReductionDb()) + juce::String (juce::CharPointer_UTF8 (" · ")) + phase : phase;
+        };
         setTip (c->rightLabel, "c:eq.phase");
         c->rightLabel.setInterceptsMouseClicks (true, false);
         c->rightLabel.addMouseListener (this, false);
@@ -540,7 +544,7 @@ void ModuleDetail::Header::paint (juce::Graphics& g)
 ModuleDetail::ModuleDetail (Context& context, const juce::String& moduleKey) : ctx (context), key (moduleKey)
 {
     static const std::map<juce::String, std::pair<juce::String, juce::StringArray>> modules {
-        { "in", { "Input", { "in_", "hpf_" } } }, { "eq", { "Dynamic EQ", { "eq_" } } }, { "mb", { "Multiband", { "mb_" } } },
+        { "in", { "Input", { "in_", "hpf_" } } }, { "eq", { "Dynamic EQ", { "eq_", "rs_" } } }, { "mb", { "Multiband", { "mb_" } } },
         { "le", { "Low-End", { "lem_" } } }, { "bc", { "Bus Comp", { "bus_" } } }, { "sat", { "Saturation", { "sat_" } } },
         { "st", { "Stereo", { "st_" } } }, { "cl", { "Clipper", { "clip_" } } }, { "li", { "Limiter", { "lim_" } } },
         { "out", { "Output", { "out_", "quality" } } }
@@ -567,7 +571,9 @@ ModuleDetail::ModuleDetail (Context& context, const juce::String& moduleKey) : c
         if (! match)
             continue;
         juce::String group = title;
-        if (s.id.startsWith ("eq_b"))
+        if (s.id.startsWith ("rs_"))
+            group = "Resonance suppressor";
+        else if (s.id.startsWith ("eq_b"))
             group = "Band " + s.id.fromFirstOccurrenceOf ("eq_b", false, false).upToFirstOccurrenceOf ("_", false, false);
         else if (s.id.startsWith ("mb_b"))
             group = "Band " + s.id.fromFirstOccurrenceOf ("mb_b", false, false).upToFirstOccurrenceOf ("_", false, false);

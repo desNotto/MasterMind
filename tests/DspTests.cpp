@@ -438,3 +438,58 @@ TEST_CASE ("Automating every continuous parameter causes no clicks", "[dsp][auto
         CHECK (worst < 0.1);
     }
 }
+
+TEST_CASE ("Resonance suppressor cuts a sticking-out tone and keeps its latency", "[dsp][resonance]")
+{
+    const double fs = 48000.0;
+    const int n = 96000;
+    juce::Random random (3);
+    juce::AudioBuffer<float> src (2, n);
+    for (int i = 0; i < n; ++i)
+    {
+        const float v = (float) (0.02 * (random.nextDouble() * 2.0 - 1.0) + 0.3 * std::sin (twoPi * 2500.0 * i / fs));
+        src.setSample (0, i, v);
+        src.setSample (1, i, v);
+    }
+    const auto toneLevel = [&] (const juce::AudioBuffer<float>& b)
+    {
+        double re = 0, im = 0;
+        for (int i = n / 2; i < n; ++i)
+        {
+            re += b.getSample (0, i) * std::cos (twoPi * 2500.0 * i / fs);
+            im += b.getSample (0, i) * std::sin (twoPi * 2500.0 * i / fs);
+        }
+        return 20.0 * std::log10 (std::sqrt (re * re + im * im) / (n / 4));
+    };
+    Host h;
+    h.set ("eq_on", 1.0f);
+    h.set ("rs_on", 1.0f);
+    h.set ("rs_depth", 12.0f);
+    h.chain.prepare (fs, 512, false);
+    CHECK (h.chain.latencySamples() >= 2048);
+    juce::AudioBuffer<float> b;
+    b.makeCopyOf (src);
+    mmtest::runChain (h, b, 512);
+    const double before = toneLevel (src), after = toneLevel (b);
+    INFO ("tone before " << before << " dB, after " << after << " dB");
+    CHECK (after < before - 6.0);
+
+    // impulse latency with the suppressor on and nothing to suppress
+    Host h2;
+    h2.set ("eq_on", 1.0f);
+    h2.set ("rs_on", 1.0f);
+    h2.set ("rs_depth", 0.0f);
+    h2.chain.prepare (fs, 512, false);
+    const int latency = h2.chain.latencySamples();
+    juce::AudioBuffer<float> imp (2, latency + 4096);
+    imp.clear();
+    imp.setSample (0, 100, 0.5f);
+    imp.setSample (1, 100, 0.5f);
+    mmtest::runChain (h2, imp, 512);
+    int peakPos = 0;
+    for (int i = 0; i < imp.getNumSamples(); ++i)
+        if (std::abs (imp.getSample (0, i)) > std::abs (imp.getSample (0, peakPos)))
+            peakPos = i;
+    CHECK (peakPos == 100 + latency);
+    CHECK (imp.getSample (0, peakPos) == Catch::Approx (0.5f).margin (0.01f));
+}

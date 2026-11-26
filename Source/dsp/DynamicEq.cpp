@@ -83,6 +83,7 @@ void DynamicEq::prepare (const Context& ctx)
     for (auto& c : conv)
         c.prepare (spec);
     convPrepared = true;
+    resonance.prepare (fs, maxBlock);
     reset();
 }
 
@@ -109,6 +110,7 @@ void DynamicEq::reset()
     }
     for (auto& c : conv)
         c.reset();
+    resonance.reset();
 }
 
 void DynamicEq::designBand (int index, BandState& st, double f, double g, double q, bool deltaOnly) noexcept
@@ -138,6 +140,7 @@ void DynamicEq::process (float* left, float* right, int numSamples) noexcept
         processLinearPhase (left, right, numSamples);
     else
         processMinimumPhase (left, right, numSamples);
+    resonance.process (left, right, numSamples);
 }
 
 void DynamicEq::processMinimumPhase (float* left, float* right, int numSamples) noexcept

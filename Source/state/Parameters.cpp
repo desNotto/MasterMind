@@ -90,6 +90,17 @@ std::vector<Spec> build()
         v.push_back (f (eq (band, "rel"), n + "Release", 5.0f, 1000.0f, 100.0f, Unit::ms, 100.0f));
     }
 
+    // Resonance suppressor (part of 4.2; added in M7, new IDs only)
+    v.push_back (b ("rs_on", "Resonance Suppressor On", false));
+    v.back().automatable = false; // changes the latency
+    v.push_back (f ("rs_low", "Resonance Low", 150.0f, 12000.0f, 150.0f, Unit::hz, 1300.0f));
+    v.push_back (f ("rs_high", "Resonance High", 150.0f, 12000.0f, 12000.0f, Unit::hz, 1300.0f));
+    v.push_back (f ("rs_depth", "Resonance Depth", 0.0f, 20.0f, 6.0f, Unit::dB));
+    v.push_back (f ("rs_sharp", "Resonance Sharpness", 0.0f, 100.0f, 50.0f, Unit::percent));
+    v.push_back (f ("rs_speed", "Resonance Speed", 0.0f, 100.0f, 50.0f, Unit::percent));
+    v.push_back (f ("rs_mix", "Resonance Mix", 0.0f, 100.0f, 100.0f, Unit::percent));
+    v.push_back (b ("rs_delta", "Resonance Delta Listen", false));
+
     // ---- 4.3 Multiband dynamics ------------------------------------------------------------
     static constexpr float xoDefaults[4] = { 80.0f, 250.0f, 1500.0f, 5500.0f };
     v.push_back (b ("mb_on", "Multiband On", false));

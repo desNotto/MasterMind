@@ -66,6 +66,7 @@ jobs:
           New-Item -ItemType Directory -Force package | Out-Null
           Copy-Item build/dist/MasterMind.vst3 package/
           Copy-Item docs/README_RU.md package/
+          Copy-Item "build/dist/MasterMind Album Analyzer.exe" package/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

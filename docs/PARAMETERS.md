@@ -136,6 +136,14 @@ Generated from `Source/state/Parameters.cpp`. The IDs are frozen since M1 (spec 
 | `eq_b10_mode` | EQ 10 Dyn Mode | Compress, Expand | Compress | yes |
 | `eq_b10_att` | EQ 10 Attack | 0.1 ms to 100 ms | 10 ms | yes |
 | `eq_b10_rel` | EQ 10 Release | 5.0 ms to 1.00 s | 100 ms | yes |
+| `rs_on` | Resonance Suppressor On | Off / On | Off | no |
+| `rs_low` | Resonance Low | 150 Hz to 12.0 kHz | 150 Hz | yes |
+| `rs_high` | Resonance High | 150 Hz to 12.0 kHz | 12.0 kHz | yes |
+| `rs_depth` | Resonance Depth | 0.0 dB to 20.0 dB | 6.0 dB | yes |
+| `rs_sharp` | Resonance Sharpness | 0% to 100% | 50% | yes |
+| `rs_speed` | Resonance Speed | 0% to 100% | 50% | yes |
+| `rs_mix` | Resonance Mix | 0% to 100% | 100% | yes |
+| `rs_delta` | Resonance Delta Listen | Off / On | Off | yes |
 | `mb_on` | Multiband On | Off / On | Off | yes |
 | `mb_xover_type` | Multiband Crossover | Linkwitz-Riley, Linear phase | Linkwitz-Riley | no |
 | `mb_xo1_freq` | Crossover 1 | 30 Hz to 16.0 kHz | 80 Hz | yes |
