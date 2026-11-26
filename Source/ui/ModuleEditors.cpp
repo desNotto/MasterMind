@@ -835,7 +835,7 @@ public:
         for (int b = 0; b < 5; ++b)
         {
             const float x0 = xOf (edges[b]), x1 = xOf (edges[b + 1]);
-            const float gr = -ctx.proc.getChain().getMultiband().gainReductionDb (b);
+            const float gr = std::max (0.0f, -ctx.proc.getChain().getMultiband().gainReductionDb (b));
             g.setColour (col::orange.withAlpha (0.28f));
             g.fillRect (juce::Rectangle<float> (x0, 0.0f, x1 - x0, r.getHeight() * juce::jlimit (0.0f, 1.0f, gr / 7.0f)));
             auto t = juce::Rectangle<float> (x0 + (b == 0 ? 6.0f : 44.0f), 0.0f, x1 - x0 - (b == 0 ? 8.0f : 46.0f), r.getHeight());
@@ -960,7 +960,7 @@ public:
             g.drawText (band == 1 ? "<" + hzShort (hi) : (band == 5 ? ">" + hzShort (lo) : hzShort (lo) + juce::String (juce::CharPointer_UTF8 ("\xe2\x80\x93")) + hzShort (hi)), t, juce::Justification::centredLeft, true);
         }
         // gain reduction bar
-        const float gr = -ctx.proc.getChain().getMultiband().gainReductionDb (band - 1);
+        const float gr = std::max (0.0f, -ctx.proc.getChain().getMultiband().gainReductionDb (band - 1));
         auto row = grArea;
         g.setColour (col::text3);
         g.setFont (font (12.0f));
