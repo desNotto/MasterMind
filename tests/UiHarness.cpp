@@ -134,6 +134,51 @@ int main (int argc, char** argv)
         std::printf ("unprepared editor: ok\n");
     }
 
+    // like pluginval's fuzz and state tests: random parameter values while processing, state round trips
+    {
+        MasterMindProcessor fz;
+        std::unique_ptr<juce::AudioProcessorEditor> e (fz.createEditor());
+        juce::Random rnd (77);
+        int nonFinite = 0;
+        for (double sr : { 44100.0, 96000.0, 48000.0 })
+        {
+            const int maxBlock = 1024;
+            fz.setPlayConfigDetails (2, 2, sr, maxBlock);
+            fz.prepareToPlay (sr, maxBlock);
+            juce::AudioBuffer<float> b (2, maxBlock);
+            juce::MidiBuffer midi;
+            for (int it = 0; it < 120; ++it)
+            {
+                for (auto* p : fz.getParameters())
+                    if (rnd.nextInt (4) == 0)
+                        p->setValueNotifyingHost (rnd.nextFloat());
+                const int n = 1 + rnd.nextInt (maxBlock);
+                juce::AudioBuffer<float> view (b.getArrayOfWritePointers(), 2, n);
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < n; ++i)
+                        view.setSample (ch, i, 0.8f * (rnd.nextFloat() * 2.0f - 1.0f));
+                fz.processBlock (view, midi);
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < n; ++i)
+                        if (! std::isfinite (view.getSample (ch, i)))
+                            ++nonFinite;
+                if (it % 30 == 0)
+                {
+                    juce::MemoryBlock state;
+                    fz.getStateInformation (state);
+                    fz.setStateInformation (state.getData(), (int) state.getSize());
+                    juce::MessageManager::getInstance()->runDispatchLoopUntil (10);
+                    dynamic_cast<MasterMindEditor*> (e.get())->forceUpdate();
+                }
+            }
+            fz.releaseResources();
+        }
+        e.reset();
+        std::printf ("fuzz: %d non-finite samples\n", nonFinite);
+        if (nonFinite > 0)
+            return 1;
+    }
+
     MasterMindProcessor proc;
     proc.setPlayConfigDetails (2, 2, 48000.0, 512);
     proc.prepareToPlay (48000.0, 512);
