@@ -1,0 +1,25 @@
+# Build output
+build/
+out/
+cmake-build-*/
+.vs/
+.vscode/
+.idea/
+*.user
+
+# CI downloads and packages
+pluginval/
+pluginval.zip
+pluginval-logs/
+package/
+
+# Never commit audio (reference tracks are copyrighted, spec section 2)
+*.wav
+*.flac
+*.mp3
+*.ogg
+*.aif
+*.aiff
+
+# Local Claude settings
+.claude/settings.local.json
