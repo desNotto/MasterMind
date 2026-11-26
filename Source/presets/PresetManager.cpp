@@ -29,25 +29,9 @@ std::map<juce::String, float> with (std::initializer_list<std::pair<const char*,
 const std::vector<std::pair<juce::String, std::map<juce::String, float>>>& PresetManager::factoryPresets()
 {
     // Conservative starting points, not finished masters (spec section 9).
+    // "Tight Modern Metal" and "Wide and Loud" were removed at the user's request (D-027).
     static const std::vector<std::pair<juce::String, std::map<juce::String, float>>> presets {
         { "Init", defaults() },
-        { "Tight Modern Metal",
-          with ({ { "hpf_on", 1 }, { "hpf_freq", 28 }, { "hpf_slope", 1 },
-                  { "eq_on", 1 }, { "eq_b4_on", 1 }, { "eq_b4_freq", 280 }, { "eq_b4_gain", -1.5f }, { "eq_b4_q", 1.2f },
-                  { "eq_b4_dyn", 1 }, { "eq_b4_thr", -30 }, { "eq_b4_range", 3 },
-                  { "eq_b8_on", 1 }, { "eq_b8_freq", 4800 }, { "eq_b8_gain", -1.0f }, { "eq_b8_q", 2.0f },
-                  { "eq_b8_dyn", 1 }, { "eq_b8_thr", -32 }, { "eq_b8_range", 3 },
-                  { "lem_on", 1 }, { "lem_mono_freq", 120 },
-                  { "bus_on", 1 }, { "bus_thr", -14 }, { "bus_ratio", 1 }, { "bus_att", 10 }, { "bus_sc_hpf", 100 },
-                  { "clip_on", 1 }, { "clip_thr", -1.5f }, { "clip_type", 1 },
-                  { "lim_on", 1 }, { "lim_drive", 4 }, { "lim_ceiling", -1 }, { "lim_mode", 1 } }) },
-        { "Wide and Loud",
-          with ({ { "hpf_on", 1 }, { "hpf_freq", 25 },
-                  { "lem_on", 1 }, { "lem_mono_freq", 140 },
-                  { "sat_on", 1 }, { "sat_b1_drive", 3 }, { "sat_b1_type", 1 }, { "sat_b2_drive", 1.5f },
-                  { "st_on", 1 }, { "st_mid_width", 110 }, { "st_high_width", 125 }, { "st_guard_on", 1 },
-                  { "clip_on", 1 }, { "clip_thr", -2 },
-                  { "lim_on", 1 }, { "lim_drive", 7 }, { "lim_mode", 2 } }) },
         { "Djent Low-End Focus",
           with ({ { "hpf_on", 1 }, { "hpf_freq", 32 }, { "hpf_slope", 2 },
                   { "mb_on", 1 }, { "mb_b1_thr", -26 }, { "mb_b1_ratio", 3 }, { "mb_b1_att", 15 }, { "mb_b1_rel", 120 },

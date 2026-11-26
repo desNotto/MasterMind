@@ -6,7 +6,8 @@ Every visual change starts here (see `CLAUDE.md`, "Visual changes: mockup first"
 
 | Version | Date | Status | What changed |
 | --- | --- | --- | --- |
-| [m1-main-window-v4](m1-main-window-v4-2026-11-26/) | 2026-11-26 | **Approved** by the user, reference for the M1 UI | Russian tooltips with recommendations on every control (D-011) |
+| [m1-main-window-v5](m1-main-window-v5-2026-11-27/) | 2026-11-27 | Proposed, awaiting approval | Master workspace: smaller spectrum, module bar with a full module editor (no double-click panel), balance column with tonal balance, loudness and checks |
+| [m1-main-window-v4](m1-main-window-v4-2026-11-26/) | 2026-11-26 | Approved, implemented in 0.7 | Russian tooltips with recommendations on every control (D-011) |
 | [m1-main-window-v3](m1-main-window-v3-2026-11-26/) | 2026-11-26 | Superseded by v4 | Smaller spectrum; all ten modules in two rows, no scrolling |
 | [m1-main-window-v2](m1-main-window-v2-2026-11-26/) | 2026-11-26 | Superseded by v3 | Knob tooltips; interactive mockup |
 | [m1-main-window-v1](m1-main-window-v1-2026-11-26/) | 2026-11-26 | Superseded by v2 | First main window: top bar, Master, Eyes, compact mode, monitoring state |

@@ -134,3 +134,7 @@ Implemented inside the Dynamic EQ module, after the ten bands, with new paramete
 ## D-026 Offline album analyzer (7.5, optional)
 
 `MasterMind Album Analyzer.exe` is a small standalone application in the same zip. Dropping the bounced songs of an album computes their passports with the same analysis as references and stores them in the album file. The plugin itself stays a single `.vst3`; the analyzer is an optional extra and needs no installation.
+
+## D-027 Two factory presets removed (2026-11-27)
+
+At the user's request the factory presets "Tight Modern Metal" and "Wide and Loud" were removed. The remaining factory presets are Init, Djent Low-End Focus, Gentle Glue and Streaming Safe. A project that refers to a removed preset keeps its stored parameter values and shows the preset as modified.
