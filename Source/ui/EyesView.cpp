@@ -1,4 +1,5 @@
 #include "ui/EyesView.h"
+#include "ui/Locale.h"
 
 namespace mm::ui
 {
@@ -121,8 +122,9 @@ void TonalPanel::resized()
 void TonalPanel::paint (juce::Graphics& g)
 {
     drawPanel (g, getLocalBounds().toFloat());
-    paintPanelHeader (g, getLocalBounds(), "Tonal balance", "vs target");
-    target.setButtonText ("Target: " + ctx.snap.targets.name);
+    paintPanelHeader (g, getLocalBounds(), tr ("Tonal balance"), tr ("vs target"));
+    basis.setOptions ({ tr ("Integrated##tonal"), tr ("Last 10 s") });
+    target.setButtonText (tr ("Target: ") + ctx.snap.targets.name);
     const auto& t = viewTap (ctx);
     const auto& tonal = basis.getSelected() == 1 ? t.tonalRecent : t.tonalIntegrated;
     const auto& tg = ctx.snap.targets;
@@ -187,7 +189,7 @@ void TonalPanel::paint (juce::Graphics& g)
     g.fillRoundedRectangle (sbox, 6.0f);
     g.setColour (col::text);
     g.setFont (font (12.5f));
-    g.drawFittedText (sentence.isEmpty() ? (t.hasSignal ? juce::String ("All six bands are within 1 dB of the target") : juce::String ("Play audio to measure")) : sentence.joinIntoString (juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 "))),
+    g.drawFittedText (sentence.isEmpty() ? (t.hasSignal ? tr ("All six bands are within 1 dB of the target") : tr ("Play audio to measure")) : sentence.joinIntoString (juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 "))),
                       sbox.reduced (10, 2).toNearestInt(), juce::Justification::centredLeft, 2);
 }
 
@@ -233,7 +235,7 @@ void LoudnessPanel::resized()
 void LoudnessPanel::paint (juce::Graphics& g)
 {
     drawPanel (g, getLocalBounds().toFloat());
-    paintPanelHeader (g, getLocalBounds(), "Loudness", "BS.1770 / EBU R128");
+    paintPanelHeader (g, getLocalBounds(), tr ("Loudness"), "BS.1770 / EBU R128");
     const auto& t = viewTap (ctx);
     const double tgt = ctx.snap.targets.integratedLufs;
     target.setButtonText (std::abs (tgt + 14.0) < 0.01 ? "Target: Streaming ref" : "Target: " + fmtMinus (tgt, 0) + " LUFS");
@@ -255,9 +257,9 @@ void LoudnessPanel::paint (juce::Graphics& g)
         g.setFont (font (12.0f));
         g.drawText ("LUFS", cell.reduced (10, 4).withTrimmedTop (16), juce::Justification::bottomRight);
     };
-    big (top.removeFromLeft (top.getWidth() * 2 / 5), "Integrated", t.integrated, true);
-    big (top.removeFromLeft (top.getWidth() / 2), "Short-term", t.shortTerm, false);
-    big (top, "Momentary", t.momentary, false);
+    big (top.removeFromLeft (top.getWidth() * 2 / 5), tr ("Integrated##loudness"), t.integrated, true);
+    big (top.removeFromLeft (top.getWidth() / 2), tr ("Short-term"), t.shortTerm, false);
+    big (top, tr ("Momentary"), t.momentary, false);
 
     // statistics grid
     r.removeFromTop (6);
@@ -273,10 +275,10 @@ void LoudnessPanel::paint (juce::Graphics& g)
         { "True peak", fmtLufs (t.truePeak), "dBTP", tpCol },
         { "PLR", juce::String (t.plr, 1), "LU", t.plr >= 8 ? col::text : (t.plr >= 6 ? col::warn : col::bad) },
         { "PSR", juce::String (t.psr, 1), "LU", col::text },
-        { "Sample peak", fmtLufs (t.samplePeak), "dBFS", col::text },
-        { "Crest", juce::String (t.crest, 1), "dB", col::text },
-        { "Overs", juce::String ((juce::int64) t.sampleOvers), "", t.sampleOvers > 0 ? col::warn : col::text },
-        { "TP overs", juce::String ((juce::int64) t.truePeakOvers), "", t.truePeakOvers > 0 ? col::warn : col::text },
+        { tr ("Sample peak"), fmtLufs (t.samplePeak), "dBFS", col::text },
+        { tr ("Crest"), juce::String (t.crest, 1), "dB", col::text },
+        { tr ("Overs"), juce::String ((juce::int64) t.sampleOvers), "", t.sampleOvers > 0 ? col::warn : col::text },
+        { tr ("TP overs"), juce::String ((juce::int64) t.truePeakOvers), "", t.truePeakOvers > 0 ? col::warn : col::text },
     };
     const int cols = 4, sh = 46;
     for (int i = 0; i < 8; ++i)
@@ -290,7 +292,7 @@ void LoudnessPanel::paint (juce::Graphics& g)
     // short-term history (last 60 s) with the information-only target line
     g.setColour (col::text3);
     g.setFont (font (12.0f));
-    g.drawText ("Short-term history", r.removeFromTop (16), juce::Justification::left);
+    g.drawText (tr ("Short-term history"), r.removeFromTop (16), juce::Justification::left);
     auto hr = r.toFloat().withTrimmedRight (34).withTrimmedBottom (14);
     if (hr.getHeight() < 30)
         return;
@@ -334,7 +336,7 @@ ChecksPanel::ChecksPanel (Context& c, bool comp) : ctx (c), compact (comp) {}
 void ChecksPanel::paint (juce::Graphics& g)
 {
     drawPanel (g, getLocalBounds().toFloat());
-    paintPanelHeader (g, getLocalBounds(), "Checks", compact ? juce::String() : juce::String ("independent checks, hover for advice"));
+    paintPanelHeader (g, getLocalBounds(), tr ("Checks"), compact ? juce::String() : tr ("independent checks, hover for advice"));
     listArea = getLocalBounds().withTrimmedTop (34).reduced (6, 2);
     const auto& checks = ctx.snap.checks;
     if (checks.empty())
@@ -365,12 +367,12 @@ void ChecksPanel::paint (juce::Graphics& g)
         g.drawText (c.value, top, juce::Justification::centredRight);
         g.setColour (col::text);
         g.setFont (semibold (13.0f));
-        g.drawText (c.title, top, juce::Justification::centredLeft);
+        g.drawText (tr (c.title + "##check"), top, juce::Justification::centredLeft);
         if (! compact)
         {
             g.setColour (col::text2);
             g.setFont (font (12.0f));
-            g.drawText (c.detail, in, juce::Justification::centredLeft);
+            g.drawText (tr (c.detail), in, juce::Justification::centredLeft);
         }
     }
 }
@@ -426,7 +428,8 @@ void LowEndPanel::paint (juce::Graphics& g)
 {
     drawPanel (g, getLocalBounds().toFloat());
     const float mono = ctx.param ("lem_mono_freq");
-    paintPanelHeader (g, getLocalBounds(), "Low end", juce::String (juce::CharPointer_UTF8 ("20\xe2\x80\x93" "200 Hz, 1/12 oct")));
+    paintPanelHeader (g, getLocalBounds(), tr ("Low end"), juce::String (juce::CharPointer_UTF8 ("20\xe2\x80\x93" "200 Hz, 1/12 oct")));
+    open.setButtonText (tr ("Open Low-End tab"));
     const auto& t = viewTap (ctx);
     auto r = getLocalBounds().withTrimmedTop (36).reduced (10, 4);
     auto stats = r.removeFromBottom (large ? 56 : 50);
@@ -559,11 +562,11 @@ void LowEndPanel::paint (juce::Graphics& g)
     auto s = stats.toFloat().withTrimmedTop (6);
     drawStatBox (g, s.removeFromLeft (w), "Correlation <" + juce::String (juce::roundToInt (mono)), juce::String (lm.correlation, 2), "", lm.correlation >= 0.8 ? col::ok : (lm.correlation >= 0.5 ? col::warn : col::bad));
     s.removeFromLeft (6);
-    drawStatBox (g, s.removeFromLeft (w), "Mono loss <" + juce::String (juce::roundToInt (mono)), fmtMinus (lm.monoLossDb), "dB", lm.monoLossDb >= -1 ? col::ok : col::warn);
+    drawStatBox (g, s.removeFromLeft (w), tr ("Mono loss") + " <" + juce::String (juce::roundToInt (mono)), fmtMinus (lm.monoLossDb), "dB", lm.monoLossDb >= -1 ? col::ok : col::warn);
     s.removeFromLeft (6);
     drawStatBox (g, s.removeFromLeft (w), "Sub / Bass", fmtSigned (std::isnan (subRef) ? t.subToBass : t.subToBass - subRef), std::isnan (subRef) ? "dB" : "dB vs ref", std::isnan (subRef) ? col::text : col::warn);
     s.removeFromLeft (6);
-    drawStatBox (g, s, "Peak asymmetry", fmtSigned (t.asymmetry, 0), "%");
+    drawStatBox (g, s, tr ("Peak asymmetry"), fmtSigned (t.asymmetry, 0), "%");
 }
 
 // ---- Stereo ---------------------------------------------------------------------------------------------
@@ -573,7 +576,7 @@ void StereoPanel::paint (juce::Graphics& g)
 {
     drawPanel (g, getLocalBounds().toFloat());
     const auto& t = viewTap (ctx);
-    paintPanelHeader (g, getLocalBounds(), "Stereo");
+    paintPanelHeader (g, getLocalBounds(), tr ("Stereo##panel"));
     g.setColour (col::text3);
     g.setFont (font (12.5f));
     const auto bal = t.balanceDb;
@@ -587,7 +590,7 @@ void StereoPanel::paint (juce::Graphics& g)
     g.setColour (col::text3);
     g.setFont (font (12.0f));
     auto corrHead = r.removeFromTop (16);
-    g.drawText ("Correlation", corrHead, juce::Justification::left);
+    g.drawText (tr ("Correlation"), corrHead, juce::Justification::left);
     g.setColour (col::text);
     g.setFont (font (13.0f, true));
     g.drawText (fmtSigned (t.broadShort.correlation, 2), corrHead, juce::Justification::right);
@@ -607,7 +610,7 @@ void StereoPanel::paint (juce::Graphics& g)
     g.setColour (col::text3);
     const char* heads[] = { "Band", "Corr", "Width", "Mono loss" };
     for (int c = 0; c < 4; ++c)
-        g.drawText (heads[c], head.removeFromLeft (colW[c]), c == 0 ? juce::Justification::left : juce::Justification::right);
+        g.drawText (tr (heads[c]), head.removeFromLeft (colW[c]), c == 0 ? juce::Justification::left : juce::Justification::right);
     g.setColour (col::line);
     g.drawHorizontalLine (head.getBottom(), (float) r.getX(), (float) r.getRight());
     const int rowH = std::max (20, std::min (28, r.getHeight() / 4));

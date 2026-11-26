@@ -1,4 +1,5 @@
 #include "ui/PluginEditor.h"
+#include "ui/Locale.h"
 
 #include "mm_build_info.h"
 
@@ -133,7 +134,8 @@ public:
         {
             g.setColour (col::text2);
             g.setFont (font (13.0f));
-            g.drawText ("Analyse", analyse.getBounds().translated (-62, 0).withWidth (58), juce::Justification::centredRight);
+            resetOnPlay.setButtonText (tr ("Reset on play"));
+            g.drawText (tr ("Analyse"), analyse.getBounds().translated (-62, 0).withWidth (58), juce::Justification::centredRight);
         }
         else
         {
@@ -251,6 +253,10 @@ public:
         quality.addItem (3, "High (4x)", true, q == 2);
         m.addSubMenu ("Quality", quality);
         m.addItem (10, "Reset analysis on transport start", true, ctx.proc.resetOnPlay.load());
+        juce::PopupMenu lang;
+        lang.addItem (30, "English", true, language() == Language::english);
+        lang.addItem (31, juce::String (juce::CharPointer_UTF8 ("\xd0\xa0\xd1\x83\xd1\x81\xd1\x81\xd0\xba\xd0\xb8\xd0\xb9")), true, language() == Language::russian);
+        m.addSubMenu ("Language", lang);
         m.addSeparator();
         m.addItem (20, "Open settings folder (settings.json, presets, emulations)");
         m.addItem (21, "Open reference cache folder");
@@ -265,6 +271,13 @@ public:
             }
             else if (r == 20)
                 mm::GlobalSettings::userDataDirectory().startAsProcess();
+            else if (r == 30 || r == 31)
+            {
+                setLanguage (r == 31 ? Language::russian : Language::english);
+                ctx.settings.set ("language", r == 31 ? "ru" : "en");
+                if (auto* top = getTopLevelComponent())
+                    top->repaint();
+            }
             else if (r == 21)
                 mm::GlobalSettings::userDataDirectory().getChildFile ("refcache").startAsProcess();
         });
@@ -282,7 +295,7 @@ public:
         const int latency = ctx.proc.getLatencySamples();
         const double fs = ctx.proc.getSampleRate();
         const double ms = fs > 0.0 ? 1000.0 * latency / fs : 0.0;
-        juce::String right = "CPU " + juce::String (100.0f * ctx.proc.getCpuLoad(), 1) + "%    Latency " + juce::String (latency) + " samples (" + juce::String (ms, 2) + " ms)";
+        juce::String right = "CPU " + juce::String (100.0f * ctx.proc.getCpuLoad(), 1) + "%    " + tr ("Latency") + " " + juce::String (latency) + " " + tr ("samples") + " (" + juce::String (ms, 2) + " ms)";
         if (fs > 0.0)
             right << "    " << juce::String (fs / 1000.0, fs == 44100.0 || fs == 88200.0 ? 1 : 0) << " kHz";
         if (ctx.snap.droppedFrames > 0)
@@ -312,6 +325,7 @@ MasterMindEditor::MasterMindEditor (MasterMindProcessor& p) : AudioProcessorEdit
         ctx.engine.channel = juce::jlimit (0, 4, (int) a.getProperty ("channel", 4));
     }
     processorRef.resetOnPlay = (bool) ctx.settings.get ("resetOnPlay", true);
+    setLanguage (ctx.settings.get ("language", "en").toString() == "ru" ? Language::russian : Language::english);
     auto targets = ctx.engine.getTargets();
     targets.integratedLufs = (double) ctx.settings.get ("loudnessTarget", -14.0);
     ctx.engine.setTargets (targets);

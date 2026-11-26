@@ -1,6 +1,7 @@
 // Layout test harness (spec section 10): renders the editor at several sizes, fails if any
 // control leaves the window or overlaps a neighbouring control, and writes PNG snapshots.
 #include "PluginProcessor.h"
+#include "ui/Locale.h"
 #include "ui/PluginEditor.h"
 #include "ui/Widgets.h"
 
@@ -159,6 +160,25 @@ int main (int argc, char** argv)
         juce::PNGImageFormat().writeImageToStream (image, os);
         std::printf ("%s: %s\n", label.toRawUTF8(), file.getFullPathName().toRawUTF8());
     }
+    // Russian interface strings
+    mm::ui::setLanguage (mm::ui::Language::russian);
+    for (const char* tab : { "Eyes", "Spectrogram" })
+    {
+        editor->setSize (1280, 800);
+        editor->showTab (tab);
+        for (int i = 0; i < 4; ++i)
+        {
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
+            editor->forceUpdate();
+        }
+        failures += checkLayout (editor->getRoot(), juce::String ("ru ") + tab);
+        auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        const auto file = outDir.getChildFile ("1280x800-" + juce::String (tab).toLowerCase() + "-ru.png");
+        file.deleteFile();
+        juce::FileOutputStream os (file);
+        juce::PNGImageFormat().writeImageToStream (image, os);
+    }
+    mm::ui::setLanguage (mm::ui::Language::english);
     editor.reset();
     proc.releaseResources();
     std::printf (failures == 0 ? "LAYOUT OK\n" : "LAYOUT FAILURES: %d\n", failures);

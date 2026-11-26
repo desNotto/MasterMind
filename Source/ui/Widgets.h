@@ -105,6 +105,14 @@ public:
     void attach (juce::AudioProcessorValueTreeState& state, const juce::String& paramId);
     void setSelected (int index, bool notify = true);
     int getSelected() const { return selected; }
+    void setOptions (const juce::StringArray& o)
+    {
+        if (o != options)
+        {
+            options = o;
+            repaint();
+        }
+    }
     std::function<void (int)> onChange;
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;

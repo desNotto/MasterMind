@@ -1,4 +1,5 @@
 #include "ui/ModuleStrip.h"
+#include "ui/Locale.h"
 
 #include "state/Parameters.h"
 
@@ -490,12 +491,12 @@ void ModuleStrip::update()
 void ModuleStrip::paint (juce::Graphics& g)
 {
     drawPanel (g, getLocalBounds().toFloat());
-    auto r = paintPanelHeader (g, getLocalBounds(), "Signal chain", "10 modules, fixed order: left to right, top to bottom");
+    auto r = paintPanelHeader (g, getLocalBounds(), tr ("Signal chain"), tr ("10 modules, fixed order: left to right, top to bottom"));
     juce::ignoreUnused (r);
     g.setColour (col::text3);
     g.setFont (font (12.5f));
     const int lat = ctx.proc.getLatencySamples();
-    g.drawText ("Chain latency " + juce::String (lat) + " smp", getLocalBounds().removeFromTop (32).reduced (12, 0), juce::Justification::centredRight);
+    g.drawText (tr ("Chain latency") + " " + juce::String (lat) + " smp", getLocalBounds().removeFromTop (32).reduced (12, 0), juce::Justification::centredRight);
 }
 
 void ModuleStrip::resized()

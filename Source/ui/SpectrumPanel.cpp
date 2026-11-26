@@ -1,4 +1,5 @@
 #include "ui/SpectrumPanel.h"
+#include "ui/Locale.h"
 
 #include "dsp/DynamicEq.h"
 #include "reference/TrackAnalysis.h"
@@ -721,7 +722,7 @@ void SpectrumPanel::update()
 void SpectrumPanel::paint (juce::Graphics& g)
 {
     drawPanel (g, getLocalBounds().toFloat());
-    paintPanelHeader (g, getLocalBounds(), "Spectrum");
+    paintPanelHeader (g, getLocalBounds(), tr ("Spectrum"));
     if (compact)
         return;
     // legend

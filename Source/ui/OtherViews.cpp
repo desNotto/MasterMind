@@ -1,4 +1,5 @@
 #include "ui/OtherViews.h"
+#include "ui/Locale.h"
 
 #include "presets/PresetManager.h"
 
@@ -57,13 +58,13 @@ void LowEndView::resized()
 
 void LowEndView::paint (juce::Graphics& g)
 {
-    sectionTitle (g, side, "Low-band listen");
+    sectionTitle (g, side, tr ("Low-band listen"));
     auto r = side.withTrimmedTop (40 + 3 * 34 + 10).reduced (12, 0);
     const auto& t = viewTap (ctx);
     const auto target = ctx.refs.target();
     g.setColour (col::text2);
     g.setFont (semibold (13.0f));
-    g.drawText ("Crest per band (5.8)", r.removeFromTop (20), juce::Justification::left);
+    g.drawText (tr ("Crest per band (5.8)"), r.removeFromTop (20), juce::Justification::left);
     g.setFont (font (12.0f));
     for (int b = 0; b < analysis::numTonalBands; ++b)
     {
@@ -98,7 +99,7 @@ void StereoView::resized()
 
 void StereoView::paint (juce::Graphics& g)
 {
-    sectionTitle (g, bars, "Width and mono compatibility per band");
+    sectionTitle (g, bars, tr ("Width and mono compatibility per band"));
     const auto& t = viewTap (ctx);
     auto r = bars.withTrimmedTop (40).reduced (16, 8);
     const float w = r.getWidth() / 4.0f;
@@ -223,7 +224,7 @@ void SpectrogramView::mouseDown (const juce::MouseEvent& e)
 void SpectrogramView::paint (juce::Graphics& g)
 {
     auto top = getLocalBounds().withHeight (plot.getBottom() + 18);
-    sectionTitle (g, top, "Spectrogram", "mid signal, log frequency");
+    sectionTitle (g, top, tr ("Spectrogram"), tr ("mid signal, log frequency"));
     if (image.isValid())
         g.drawImage (image, plot.toFloat(), juce::RectanglePlacement::stretchToFit);
     g.setColour (col::text2);
@@ -247,7 +248,7 @@ void SpectrogramView::paint (juce::Graphics& g)
     const auto& t = viewTap (ctx);
     const auto target = ctx.refs.target();
     // Harshness (5.7)
-    sectionTitle (g, harsh, "Harshness", juce::String (juce::CharPointer_UTF8 ("3\xe2\x80\x93" "8 kHz vs 0.5\xe2\x80\x93" "2 kHz")));
+    sectionTitle (g, harsh, tr ("Harshness"), juce::String (juce::CharPointer_UTF8 ("3\xe2\x80\x93" "8 kHz vs 0.5\xe2\x80\x93" "2 kHz")));
     {
         auto r = harsh.withTrimmedTop (36).reduced (10, 6);
         const double ref = target.count > 0 ? target.harshness : ctx.snap.targets.harshness;
@@ -257,7 +258,7 @@ void SpectrogramView::paint (juce::Graphics& g)
         g.drawText (fmtSigned (d) + " dB", r.removeFromTop (28), juce::Justification::left);
         g.setColour (col::text3);
         g.setFont (font (12.0f));
-        g.drawText (target.count > 0 ? "vs reference set" : "vs default target", r.removeFromTop (16), juce::Justification::left);
+        g.drawText (target.count > 0 ? tr ("vs reference set") : tr ("vs default target"), r.removeFromTop (16), juce::Justification::left);
         auto hr = r.toFloat().reduced (0, 4);
         g.setColour (col::sunk);
         g.fillRoundedRectangle (hr, 5.0f);
@@ -278,7 +279,7 @@ void SpectrogramView::paint (juce::Graphics& g)
         g.drawText ("30 s history", hr.reduced (6, 2), juce::Justification::bottomLeft);
     }
     // Dynamics per band (5.8)
-    sectionTitle (g, crest, "Dynamics per band", "crest factor, dB");
+    sectionTitle (g, crest, tr ("Dynamics per band"), tr ("crest factor, dB"));
     {
         auto r = crest.withTrimmedTop (36).reduced (10, 4);
         const float bw = r.getWidth() / 6.0f;
@@ -305,7 +306,7 @@ void SpectrogramView::paint (juce::Graphics& g)
         }
     }
     // Limiter damage (5.9)
-    sectionTitle (g, damage, "Overs and limiter damage");
+    sectionTitle (g, damage, tr ("Overs and limiter damage"));
     {
         auto r = damage.withTrimmedTop (36).reduced (10, 4);
         g.setFont (font (12.0f));
@@ -567,7 +568,7 @@ void AlbumView::paint (juce::Graphics& g)
     g.drawFittedText (lines.isEmpty() ? juce::String ("All tracks are within 1 dB of the album target.") : lines.joinIntoString ("   ·   "), hr, juce::Justification::centredLeft, 2);
 
     // spectra overlay
-    sectionTitle (g, overlay, "Spectra of all tracks", "current track highlighted");
+    sectionTitle (g, overlay, tr ("Spectra of all tracks"), "");
     auto pr = overlay.withTrimmedTop (36).reduced (10, 6).toFloat();
     g.setColour (col::sunk);
     g.fillRoundedRectangle (pr, 5.0f);
@@ -593,7 +594,7 @@ void AlbumView::paint (juce::Graphics& g)
     drawSpec (ours, col::orange, 2.0f);
 
     // loudness in track order
-    sectionTitle (g, bars, "Loudness in track order", "LUFS-I");
+    sectionTitle (g, bars, tr ("Loudness in track order"), "LUFS-I");
     auto br = bars.withTrimmedTop (36).reduced (10, 6).toFloat();
     if (! a.tracks.empty())
     {
