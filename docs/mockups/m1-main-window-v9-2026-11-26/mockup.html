@@ -1,0 +1,1395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MasterMind main window mockup v9</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!--
+  MasterMind M1 mockup, version 3, 2026-11-26. Not plugin code.
+  v3: smaller spectrum; all ten modules fit in two rows without scrolling.
+  v4: a tooltip with a recommendation on every control the user can operate.
+  v5: Master becomes one workspace: smaller spectrum, a module bar, a module editor that shows
+      every control of the selected module (no double-click panel), and an always-visible
+      balance column (tonal balance, loudness, checks). Extra query parameter: mod=<module key>.
+  v6: every threshold knob has an outer ring that shows the live signal against the threshold;
+      the Saturation editor is graphical (band graph with drive and crossover handles, a type
+      list and a transfer curve per band). Extra view: view=knobs (threshold ring states).
+  v7: a yellow or red tonal balance row shows an advice tooltip: status, what you hear, how to
+      fix it with MasterMind modules. Extra view: view=tbtips (all twelve advice texts).
+  v8: EQ bands are edited on the spectrum: double-click adds a band (low cut at the left edge,
+      high cut at the right edge, bell elsewhere), drag, wheel for Q, Alt+click deletes, right-click
+      menu, a floating band panel with typed frequency or note entry and note snap. The Master
+      spectrum is taller; the multiband crossover bar is slimmer. Query: sel, menu=1, edit=freq, demo=lowcut.
+  v9: the Dynamic EQ editor repeats the band panel: Freq with the note, Gain or Slope, Q, Snap and
+      Delete as typed fields; its On, type, placement and Dynamic controls work. Query: eloc=ed.
+  Extra query parameter: t=<tooltip id>[:index] pins one control tooltip.
+  v2 adds knob tooltips (Russian text, ASD-STE100 writing rules). Hover a knob to see one.
+  Query parameters: view=master|eyes|compact, monitor=0|1, tip=0|1, knob=<knob id> (pins one knob tooltip)
+  The design is drawn at the mode's reference size (Full 1280x800, Compact 640x400)
+  and scaled uniformly to the viewport, like the plugin's fluid vector scaling.
+-->
+<style>
+:root{
+  --bg:#111317; --panel:#171a20; --panel2:#1d2129; --sunk:#0d0f13; --line:#272c35; --line2:#343a46;
+  --text:#e8eaee; --text2:#a4acb9; --text3:#6f7786;
+  --blue:#4ea1ff; --orange:#ff9f43; --yellow:#ffd84d; --magenta:#e35bd8;
+  --ok:#3ccf91; --warn:#f2c23a; --bad:#ff5468; --info:#7fb3ff; --mon:#e3262f;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#000;overflow:hidden}
+body{font-family:Inter,"Segoe UI",system-ui,sans-serif;font-size:12px;color:var(--text);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+#stage{position:absolute;left:0;top:0;transform-origin:0 0}
+.win{background:var(--bg);display:flex;flex-direction:column;position:relative;overflow:hidden}
+.win.monitor::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:var(--mon);z-index:5}
+.win.monitor{box-shadow:inset 0 0 0 2px var(--mon)}
+
+/* top bar */
+.top{height:52px;flex:none;display:flex;align-items:center;gap:6px;padding:0 8px;background:var(--panel);border-bottom:1px solid var(--line)}
+.logo{font-weight:700;font-size:15px;white-space:nowrap;margin-right:2px;letter-spacing:.1px}
+.logo b{color:var(--orange);font-weight:700}
+.grp{display:flex;align-items:center;gap:4px;height:36px;padding:0 5px;border-radius:7px;background:var(--panel2);border:1px solid var(--line);white-space:nowrap}
+.grp .cap{color:var(--text3);font-size:12px;margin:0 2px 0 1px}
+.btn{display:inline-flex;align-items:center;justify-content:center;height:24px;padding:0 7px;border-radius:5px;background:#262b34;border:1px solid var(--line2);color:var(--text);white-space:nowrap}
+.btn.ic{width:22px;padding:0;color:var(--text2)}
+.btn.tog.on{background:#2d4f7c;border-color:#4a76ad;color:#fff}
+.btn.size{font-weight:600;min-width:50px}
+.dd{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 7px;border-radius:5px;background:var(--sunk);border:1px solid var(--line2);white-space:nowrap}
+.dd .car{color:var(--text3);font-size:10px;margin-left:auto}
+.dd .tx{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.dd .mod{margin-left:-4px}
+.mod{color:var(--orange);font-weight:700}
+.seg{display:inline-flex;height:24px;border:1px solid var(--line2);border-radius:5px;overflow:hidden;background:var(--sunk)}
+.seg span{display:flex;align-items:center;padding:0 7px;color:var(--text2);border-right:1px solid var(--line2)}
+.seg span:last-child{border-right:0}
+.seg span.on{background:#2d4f7c;color:#fff}
+.ro{color:var(--text2);margin-left:2px}
+.monGrp.active{background:var(--mon);border-color:#ff6a70}
+.monGrp.active .cap{color:#fff}
+.monBadge{display:none;font-weight:700;color:#fff;letter-spacing:.2px;padding:0 4px}
+.monGrp.active .monBadge{display:inline-flex}
+.monGrp.active .seg{background:#7d1218;border-color:#ff8a8f}
+.monGrp.active .seg span{color:#ffd9db;border-color:#ff8a8f}
+.monGrp.active .seg span.on{background:#fff;color:#a3121a;font-weight:600}
+.monGrp.active .dd{background:#7d1218;border-color:#ff8a8f;color:#fff}
+.monGrp.active .dd .car{color:#ffc2c5}
+.ref{width:22px;height:24px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line2);color:var(--text2);background:#262b34;font-weight:500}
+.ref.empty{background:transparent;border-style:dashed;color:var(--text3)}
+.ref.sel{background:var(--magenta);border-color:var(--magenta);color:#1a0b19;font-weight:700}
+.meters{gap:9px;padding:0 8px}
+.mtr{display:flex;align-items:baseline;gap:4px}
+.mtr .k{color:var(--text3)}
+.mtr .v{font-size:15px;font-weight:600}
+.mtr .u{color:var(--text3)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;align-self:center}
+.spacer{flex:1}
+
+/* tabs */
+.tabs{height:34px;flex:none;display:flex;align-items:stretch;gap:2px;padding:0 10px;background:var(--bg);border-bottom:1px solid var(--line)}
+.tab{display:flex;align-items:center;padding:0 14px;color:var(--text2);font-weight:500;border-bottom:2px solid transparent}
+.tab.on{color:#fff;border-bottom-color:var(--orange)}
+.tabs .right{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--text2)}
+.chk{display:inline-flex;align-items:center;gap:5px;color:var(--text2)}
+.chk i{width:13px;height:13px;border-radius:3px;border:1px solid var(--line2);background:#2d4f7c;display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-size:10px;color:#fff}
+
+/* content */
+.content{flex:1;min-height:0;padding:8px 10px;display:flex;flex-direction:column;gap:8px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;display:flex;flex-direction:column;min-width:0;min-height:0;position:relative}
+.ph{height:32px;flex:none;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid var(--line)}
+.ph h3{margin:0;font-size:13px;font-weight:600;white-space:nowrap}
+.ph .sub{color:var(--text3);white-space:nowrap}
+.ph .right{margin-left:auto;display:flex;align-items:center;gap:6px}
+.legend{display:flex;gap:10px;color:var(--text2);white-space:nowrap}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.sw{width:14px;height:3px;border-radius:2px;display:inline-block}
+.approx{color:var(--text3);font-style:italic}
+
+/* footer */
+.foot{height:24px;flex:none;display:flex;align-items:center;gap:16px;padding:0 12px;border-top:1px solid var(--line);background:var(--panel);color:var(--text3)}
+.foot .right{margin-left:auto;display:flex;gap:16px;padding-right:14px}
+.grip{position:absolute;right:2px;bottom:2px;width:12px;height:12px;background:
+  linear-gradient(135deg,transparent 0 55%,var(--text3) 55% 62%,transparent 62% 72%,var(--text3) 72% 79%,transparent 79%)}
+
+/* module strip */
+.strip{flex:none}
+.chainmap{display:flex;gap:4px;align-items:center}
+.pill{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px;border-radius:11px;background:var(--panel2);border:1px solid var(--line);color:var(--text2)}
+.pill.cur{border-color:var(--orange);color:#fff}
+.led{width:7px;height:7px;border-radius:50%;background:#3a404b;display:inline-block;flex:none}
+.led.on{background:var(--ok);box-shadow:0 0 6px rgba(60,207,145,.7)}
+.cards{display:flex;flex-direction:column;gap:8px;padding:8px 10px 10px;flex:1;min-height:0}
+.crow{display:flex;gap:8px;flex:1;min-height:0}
+.card{flex:1 0 auto;background:var(--panel2);border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column}
+.card.off{opacity:.55}
+.card.cur{border-color:var(--orange)}
+/* info rows and band chips take the card width but do not widen the card */
+.cbd > .row:not(.bars),.cbd > .bandchips{contain:inline-size}
+.card .chd{height:28px;display:flex;align-items:center;gap:7px;padding:0 9px;border-bottom:1px solid var(--line)}
+.card .chd b{font-weight:600;white-space:nowrap}
+.card .chd .r{margin-left:auto;color:var(--text3);white-space:nowrap}
+.card .cbd{flex:1;padding:7px 8px 6px;display:flex;flex-wrap:wrap;align-content:flex-start;gap:5px 4px}
+.knob{min-width:48px;padding:0 2px;display:flex;flex-direction:column;align-items:center}
+.knob .kv{font-weight:600;margin-top:1px;white-space:nowrap}
+.knob .kl{color:var(--text3);white-space:nowrap}
+.row{display:flex;align-items:center;gap:6px;width:100%}
+.mini{color:var(--text3)}
+.grbar{display:flex;flex-direction:column;align-items:center;gap:3px;width:34px}
+.grbar .t{width:10px;height:50px;border-radius:3px;background:var(--sunk);border:1px solid var(--line2);position:relative;overflow:hidden}
+.grbar .t i{position:absolute;left:0;right:0;top:0;background:var(--orange)}
+.scroll{height:6px;margin:6px 10px 6px;border-radius:3px;background:var(--sunk);position:relative}
+.scroll i{position:absolute;left:0;top:0;bottom:0;width:62%;border-radius:3px;background:#3a414d}
+.bandchips{display:flex;gap:3px;width:100%}
+.bandchips span{flex:1;height:18px;border-radius:4px;display:flex;align-items:center;justify-content:center;background:var(--sunk);border:1px solid var(--line2);color:var(--text3)}
+.bandchips span.a{color:var(--text);border-color:#6b5d2a}
+.bandchips span.s{background:var(--yellow);color:#1b1600;border-color:var(--yellow);font-weight:700}
+
+/* eyes */
+.grid{flex:1;min-height:0;display:grid;gap:8px;grid-template-columns:510px 1fr 318px;grid-template-rows:362px 1fr}
+.tb{padding:6px 12px 8px;display:flex;flex-direction:column;gap:4px;flex:1}
+.tbrow{display:grid;grid-template-columns:92px 1fr 64px 22px;align-items:center;gap:10px;height:36px}
+.tbrow .n b{display:block;font-weight:600}
+.tbrow .n span{color:var(--text3)}
+.track{position:relative;height:22px;border-radius:4px;background:var(--sunk);border:1px solid var(--line)}
+.track .cor{position:absolute;top:0;bottom:0;background:rgba(78,161,255,.16);border-left:1px solid rgba(78,161,255,.5);border-right:1px solid rgba(78,161,255,.5)}
+.track .zero{position:absolute;top:-3px;bottom:-3px;width:2px;background:#cfe3ff;left:50%;margin-left:-1px}
+.track .val{position:absolute;top:5px;bottom:5px;border-radius:2px}
+.track .mk{position:absolute;top:2px;bottom:2px;width:4px;border-radius:2px;margin-left:-2px;background:#fff}
+.tbrow .num{text-align:right;font-weight:600;font-size:14px}
+.scale{display:grid;grid-template-columns:92px 1fr 64px 22px;gap:10px;color:var(--text3)}
+.scale div.s{display:flex;justify-content:space-between}
+.sentence{margin-top:auto;padding:8px 10px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--text)}
+.sentence b{font-weight:600}
+.light{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:11px;color:#111;flex:none}
+.light.ok{background:var(--ok);border-radius:50%}
+.light.warn{background:var(--warn);clip-path:polygon(50% 4%,98% 94%,2% 94%);padding-top:4px}
+.light.bad{background:var(--bad);border-radius:3px}
+.light.info{background:transparent;border:1.5px solid var(--info);border-radius:50%;color:var(--info);font-style:italic;font-family:Georgia,serif}
+.ld{padding:8px 12px;display:flex;flex-direction:column;gap:8px;flex:1;min-height:0}
+.big{display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:8px}
+.bigv{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 10px}
+.bigv .k{color:var(--text3)}
+.bigv .v{font-size:26px;font-weight:600;line-height:1.15}
+.bigv.main .v{font-size:30px;color:#fff}
+.bigv .u{color:var(--text2);font-size:12px;margin-left:3px;font-weight:500}
+.kv4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.kvc{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px 8px;line-height:1.3}
+.kvc .k{color:var(--text3)}
+.kvc .v{font-weight:600;font-size:14px}
+.kvc .v small{font-size:12px;color:var(--text2);font-weight:500}
+.checks{padding:4px 6px;display:flex;flex-direction:column}
+.ck{display:grid;grid-template-columns:22px 1fr auto;column-gap:8px;align-items:center;padding:5px 6px;border-radius:6px;border-bottom:1px solid var(--line)}
+.ck:last-child{border-bottom:0}
+.ck .t{font-weight:600}
+.ck .d{grid-column:2/4;color:var(--text2);font-size:12px;line-height:1.3}
+.ck .v{font-weight:600;text-align:right}
+.ck.hl{background:#2a1f25;outline:1px solid #6d3341}
+.tip{position:absolute;z-index:10;width:290px;padding:10px 12px;border-radius:8px;background:#f2f4f7;color:#15171b;box-shadow:0 8px 24px rgba(0,0,0,.55);line-height:1.4}
+.tip b{display:block;margin-bottom:3px}
+.tip::after{content:"";position:absolute;right:-7px;top:18px;border:7px solid transparent;border-right:0;border-left-color:#f2f4f7}
+.stereo{display:flex;gap:12px;padding:8px 12px;flex:1;min-height:0}
+table.bt{border-collapse:collapse;width:100%}
+table.bt th{color:var(--text3);font-weight:500;text-align:right;padding:3px 4px;border-bottom:1px solid var(--line)}
+table.bt th:first-child,table.bt td:first-child{text-align:left}
+table.bt td{padding:4px 4px;text-align:right;border-bottom:1px solid var(--line);font-weight:500;white-space:nowrap}
+.corr{position:relative;height:16px;border-radius:4px;background:linear-gradient(90deg,rgba(255,84,104,.35),rgba(242,194,58,.25) 50%,rgba(60,207,145,.35));border:1px solid var(--line2)}
+.corr i{position:absolute;top:-3px;bottom:-3px;width:3px;margin-left:-1.5px;background:#fff;border-radius:2px}
+.cs{display:flex;justify-content:space-between;color:var(--text3);margin-top:2px}
+
+/* compact */
+.c .top{height:38px;gap:6px;padding:0 6px}
+.c .logo{font-size:13px}
+.c .grp{height:28px;padding:0 4px;gap:3px}
+.c .btn,.c .dd,.c .seg{height:22px}
+.c .tabs{height:28px;padding:0 6px}
+.c .tab{padding:0 9px}
+.c .content{padding:6px;gap:6px}
+.c .foot{height:20px;font-size:11px;gap:10px;padding:0 8px}
+.c .ph{height:28px;padding:0 8px}
+.c .ck{padding:3px 4px;column-gap:6px}
+.c .light{width:15px;height:15px;font-size:10px}
+/* knob tooltips (v2) */
+.knob{cursor:pointer;border-radius:6px}
+.knob.hov{background:#262b34;box-shadow:0 0 0 1px var(--line2)}
+.ktip{position:absolute;z-index:20;width:356px;padding:10px 12px 8px;border-radius:8px;background:#f2f4f7;color:#15171b;box-shadow:0 10px 28px rgba(0,0,0,.6);line-height:1.38;font-size:12px;pointer-events:none}
+.ktip .h{display:flex;align-items:baseline;gap:8px;margin-bottom:5px}
+.ktip .h b{font-size:13px;white-space:nowrap}
+.ktip .h span{margin-left:auto;color:#3f4652;font-weight:600;white-space:nowrap}
+.ktip .s{display:grid;grid-template-columns:78px 1fr;column-gap:6px;margin-top:5px}
+.ktip .s i{font-style:normal;color:#5b6370;font-weight:600}
+.ktip .s.w i{color:#b3261e}
+.ktip .f{margin-top:8px;padding-top:5px;border-top:1px solid #d3d8df;color:#5b6370;display:flex;gap:8px}
+.ktip .f .off{margin-left:auto;color:#b3261e;font-weight:600;white-space:nowrap}
+.ktip::after{content:"";position:absolute;left:var(--ax,50%);margin-left:-7px;border:7px solid transparent}
+.ktip.up::after{bottom:-14px;border-top-color:#f2f4f7}
+.ktip.dn::after{top:-14px;border-bottom-color:#f2f4f7}
+
+/* ---------- v5: Master workspace ---------- */
+.ws{flex:1;min-height:0;display:grid;grid-template-columns:1fr 380px;gap:8px}
+.wsl{display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0}
+.wsr{display:flex;flex-direction:column;gap:8px;min-height:0}
+.mbar{flex:none;display:grid;grid-template-columns:repeat(10,1fr);gap:4px}
+.tile{height:50px;background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:5px 6px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;min-width:0;position:relative}
+.tile .tn{font-weight:600;white-space:nowrap;overflow:hidden;padding-right:10px}
+.tile .led{position:absolute;top:8px;right:7px}
+.tile .ts{color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .ts b{color:var(--orange);font-weight:600}
+.tile.off{opacity:.55}
+.tile.sel{border-color:var(--orange);background:#25221d}
+.tile.sel::after{content:"";position:absolute;left:50%;bottom:-8px;margin-left:-7px;border:7px solid transparent;border-bottom:0;border-top-color:var(--orange)}
+.tile .gr{height:4px;border-radius:2px;background:var(--sunk);overflow:hidden}
+.tile .gr i{display:block;height:100%;background:var(--orange)}
+.ed{flex:1;min-height:0}
+.edb{flex:1;min-height:0;padding:8px 10px;display:flex;flex-direction:column;gap:8px;overflow:hidden}
+.xo{height:28px;flex:none;position:relative;border-radius:6px;background:var(--sunk);border:1px solid var(--line)}
+.xo .bandseg{position:absolute;top:0;bottom:0;display:flex;flex-direction:row;align-items:center;gap:5px;padding:0 0 0 6px;color:var(--text3);white-space:nowrap;overflow:hidden}
+.xo .bandseg b{color:var(--text);font-weight:600}
+.xo .grfill{position:absolute;left:0;right:0;top:0;background:rgba(255,159,67,.28)}
+.xo .h{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--yellow)}
+.xo .h span{position:absolute;top:5px;left:5px;background:var(--yellow);color:#1b1600;font-weight:700;border-radius:4px;padding:0 5px;white-space:nowrap}
+.bands{flex:1;min-height:0;display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.bandcol{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:5px 5px 3px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.bandcol.solo{border-color:var(--yellow)}
+.bh{display:flex;align-items:center;gap:4px}
+.bh b{font-weight:600;white-space:nowrap}
+.bh .mini{white-space:nowrap}
+.bh .r{margin-left:auto;display:flex;gap:3px}
+.sb{height:19px;min-width:19px;padding:0 3px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;border:1px solid var(--line2);background:#262b34;color:var(--text2);font-weight:600}
+.sb.on{background:var(--yellow);color:#1b1600;border-color:var(--yellow)}
+.sb.byp.on{background:#3a404b;color:#fff;border-color:#59606d}
+.grh{display:flex;align-items:center;gap:6px;color:var(--text3)}
+.grh .t{flex:1;height:6px;border-radius:3px;background:var(--sunk);overflow:hidden}
+.grh .t i{display:block;height:100%;background:var(--orange);margin-left:auto}
+.grh b{color:var(--orange);font-weight:600;min-width:44px;text-align:right}
+.kgrid{display:grid;grid-template-columns:repeat(3,1fr);justify-items:center;row-gap:2px}
+.kgrid .knob{min-width:0;width:100%}
+.krow{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:flex-start}
+.sect{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:6px 8px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.sect .st{display:flex;align-items:center;gap:8px;font-weight:600}
+.sect .st .r{margin-left:auto;display:flex;gap:6px;align-items:center;font-weight:500}
+.chips{display:flex;gap:4px}
+.chips span{width:30px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:4px;background:var(--sunk);border:1px solid var(--line2);color:var(--text3)}
+.chips span.a{color:var(--text);border-color:#6b5d2a}
+.chips span.s{background:var(--yellow);color:#1b1600;border-color:var(--yellow);font-weight:700}
+.tbc{padding:6px 10px 8px;display:flex;flex-direction:column;gap:2px}
+.tbc .tbrow{grid-template-columns:66px 1fr 58px 18px;height:29px;gap:8px}
+.tbc .tbrow .n span{font-size:11.5px}
+.tbc .track{height:18px}
+.tbc .tbrow .num{font-size:13px}
+.tbc .light{width:16px;height:16px;font-size:10px}
+.ldc{padding:6px 10px 8px;display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:6px}
+.ldc .kvc .v{font-size:15px}
+.ldc .kvc.main .v{font-size:22px;color:#fff;line-height:1.1}
+.ldc .kvc.main{grid-row:1/3;display:flex;flex-direction:column;justify-content:center}
+.ckc .ck{padding:4px 6px}
+.ckc .ck .d{font-size:11.5px}
+
+/* ---------- v6: threshold ring, graphical saturation ---------- */
+.satg{flex:none;border-radius:6px;background:var(--sunk);border:1px solid var(--line);overflow:hidden;position:relative}
+.satg svg{display:block;width:100%;height:auto}
+.satbands{flex:1;min-height:0;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.satcard{background:var(--panel2);border:1px solid var(--line);border-top:3px solid var(--bc);border-radius:7px;padding:5px 8px 4px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.satcard .sh{display:flex;align-items:baseline;gap:6px;white-space:nowrap}
+.satcard .sh b{color:var(--bc);font-weight:700;font-size:13px}
+.satcard .sh .r{margin-left:auto}
+.satcard .sh .r b{font-size:12px}
+.sbody{display:flex;align-items:center;gap:8px}
+.tlist{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.ti{display:flex;align-items:center;gap:7px;height:20px;padding:0 6px;border-radius:4px;color:var(--text3);cursor:pointer;white-space:nowrap}
+.ti i{width:9px;height:9px;border-radius:50%;border:1.5px solid #4a515d;flex:none}
+.ti.on{color:#fff;font-weight:600;background:rgba(255,255,255,.05)}
+.ti.on i{background:var(--bc);border-color:var(--bc);box-shadow:0 0 6px var(--bc)}
+.ti:hover{color:var(--text)}
+.krow3{display:flex;justify-content:space-around}
+.curve{flex:none;border-radius:5px;background:var(--sunk);border:1px solid var(--line)}
+.sheet{padding:18px 26px;display:flex;flex-direction:column;gap:14px}
+.sheet h2{margin:0;font-size:17px;font-weight:600}
+.sheet .krs{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.sheet .cell{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 10px 12px;display:flex;flex-direction:column;align-items:center;gap:10px}
+.sheet .knob .kv{font-size:17px}
+.sheet .knob .kl{font-size:13px}
+.sheet .cap{color:var(--text2);font-size:12.5px;text-align:center;line-height:1.4}
+.sheet .cap b{color:var(--text)}
+.sheet .lg{display:flex;gap:22px;color:var(--text2);font-size:12.5px}
+.sheet .lg i{display:inline-block;width:22px;height:5px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.tbg{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px}
+.ktip.tbx{position:static;width:auto;display:block}
+.ktip.tbx::after{display:none}
+[data-t="tb.band"]{cursor:help}
+
+/* ---------- v8: band panel and menu on the spectrum ---------- */
+.bp{position:absolute;z-index:6;background:#20242c;border:1px solid #7a6a2c;border-radius:8px;padding:6px 8px;display:flex;flex-direction:column;gap:6px;box-shadow:0 8px 22px rgba(0,0,0,.55)}
+.bpr{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.bp b{color:var(--yellow);margin-right:2px}
+.bp .dd,.bp .btn{cursor:pointer}
+.pw{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line2);color:var(--text3);cursor:pointer;font-size:12px}
+.pw.on{color:#1b1600;background:var(--yellow);border-color:var(--yellow)}
+.fl{color:var(--text3);margin-left:4px}
+.fld{min-width:70px;height:22px;padding:0 6px;border-radius:4px;background:var(--sunk);border:1px solid var(--line2);display:inline-flex;align-items:center;justify-content:flex-end;font-weight:600;cursor:text}
+.fld:hover{border-color:#6b5d2a}
+.fld.ed{border-color:var(--yellow);box-shadow:0 0 0 2px rgba(255,216,77,.22)}
+.fld input{all:unset;width:70px !important;min-width:0 !important;max-width:70px;flex:none;text-align:right;color:#fff;font-weight:600;font:inherit}
+.nt{color:var(--yellow);font-weight:600;min-width:64px}
+.bph{color:var(--text3);font-size:11px}
+.cm{position:absolute;z-index:8;min-width:250px;background:#20242c;border:1px solid var(--line2);border-radius:7px;padding:4px;box-shadow:0 10px 26px rgba(0,0,0,.6)}
+.cm .it{display:flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:4px;color:var(--text);cursor:pointer;white-space:nowrap;position:relative}
+.cm .it:hover{background:#2d4f7c}
+.cm .it .k{margin-left:auto;padding-left:16px;color:var(--text3)}
+.cm .mk2{width:12px;color:var(--yellow);font-weight:700}
+.cm hr{border:0;border-top:1px solid var(--line);margin:4px 2px}
+.cm .smenu{display:none;left:100%;top:-5px;min-width:150px}
+.cm .it:hover>.smenu{display:block}
+.cm .it.hl{background:#2d4f7c}
+.shot .cm .it.hl>.smenu{display:block}
+.bfx{margin-left:auto;align-self:center;display:flex;flex-direction:column;gap:6px;padding:6px 8px;border-radius:7px;background:var(--panel);border:1px solid var(--line)}
+.bfx .bpr .fl:first-child{min-width:34px}
+/* mockup bar (not part of the plugin) */
+#mbar{position:fixed;left:0;right:0;top:0;z-index:50;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:7px max(12px, env(safe-area-inset-left, 0px));background:#050608;border-bottom:1px solid #22262e;color:#a4acb9;font-size:13px}
+#mbar .mt{color:#e8eaee;font-weight:600;margin-right:4px}
+#mbar .mg{display:inline-flex;border:1px solid #343a46;border-radius:6px;overflow:hidden}
+#mbar button{font:inherit;color:#c9ced6;background:#14171c;border:0;padding:5px 11px;cursor:pointer}
+#mbar .mg button+button{border-left:1px solid #343a46}
+#mbar button.on{background:#2b4a73;color:#fff}
+#mbar button.mm{border:1px solid #343a46;border-radius:6px}
+#mbar button.mm.on{background:var(--mon);border-color:#ff6a70;color:#fff}
+#mbar button:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+#mbar .mi{color:#6f7786}
+#mbar .mh{flex-basis:100%}
+@media (min-width:1100px){#mbar .mh{flex-basis:auto;margin-left:auto}}
+#mToast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:60;background:#f2f4f7;color:#15171b;padding:8px 14px;border-radius:8px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+#mToast[hidden],#mbar[hidden]{display:none}
+.tab,.monGrp,.btn.size,[data-t]{cursor:pointer}
+.thov{box-shadow:0 0 0 1px #8a93a3 !important;border-radius:5px}
+</style>
+</head>
+<body>
+<div id="mbar">
+  <b class="mt">MasterMind · макет v9</b>
+  <span class="mg"><button type="button" id="vMaster" data-view="master">Master</button><button type="button" id="vEyes" data-view="eyes">Eyes</button><button type="button" id="vCompact" data-view="compact">Компактный</button></span>
+  <span class="mg"><button type="button" id="s100" data-size="100">100%</button><button type="button" id="s120" data-size="120">120%</button></span>
+  <button type="button" id="mMon" class="mm">Мониторинг: выкл</button>
+  <span id="mInfo" class="mi"></span>
+  <span class="mi mh">Наведите курсор на любую ручку, кнопку или список: через 0,5 с появится подсказка. Вкладки, Monitor и кнопка размера в окне тоже нажимаются.</span>
+</div>
+<div id="mToast" hidden></div>
+<div id="stage"></div>
+<script>
+const P = new URLSearchParams(location.search);
+let VIEW = P.get('view') || 'master';
+let MON = P.get('monitor') === '1';
+let TIP = P.get('tip') === '1';
+let COMPACT = VIEW === 'compact' || VIEW === 'cmaster';
+let DW = COMPACT ? 640 : 1280, DH = COMPACT ? 400 : 800;
+let SIZE = 100; // 100 or 120, interactive mode only
+let MOD = P.get('mod') || 'mb';
+const SHOT = location.search.length > 1; // query string = static PNG render, no mockup bar
+
+/* ---------- helpers ---------- */
+const LF = Math.log10(20), HF = Math.log10(20000);
+const fx = (f, w, lo = 20, hi = 20000) => (Math.log10(f) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo)) * w;
+const gauss = (f, f0, g, bw) => { const o = Math.log2(f / f0); return g * Math.exp(-(o * o) / (2 * bw * bw)); };
+const hp = (f, fc, n) => -10 * Math.log10(1 + Math.pow(fc / f, 2 * n));
+const lp = (f, fc, n) => -10 * Math.log10(1 + Math.pow(f / fc, 2 * n));
+const rip = (f, s) => { const l = Math.log2(f); return 0.9 * Math.sin(l * 5.1 + s) + 0.6 * Math.sin(l * 11.3 + s * 2) + 0.35 * Math.sin(l * 23.7 + s * 3); };
+const target = f => -25 + gauss(f, 60, 3, 0.8) + gauss(f, 320, -1, 1) + gauss(f, 3500, 1, 1) + hp(f, 30, 3) + lp(f, 14500, 2);
+const outC = f => target(f) + gauss(f, 46, 3.4, 0.45) + gauss(f, 300, -1.3, 0.8) + gauss(f, 11000, -1.8, 0.6) + rip(f, 1) * (f < 200 ? 1.3 : 0.7);
+const inC = f => outC(f) - 2.2 + gauss(f, 30, 5, 0.5) + gauss(f, 5600, 1.6, 0.6) + rip(f, 4) * 0.6;
+const peakC = f => outC(f) + 4 + 1.4 * Math.abs(rip(f, 7));
+const corW = f => 1.6 + gauss(f, 22, 2.2, 1) + gauss(f, 17000, 2.4, 0.9);
+const bell = (f, f0, g, q) => gauss(f, f0, g, 0.6 / q);
+const lshelf = (f, f0, g) => g / (1 + Math.pow(f / f0, 2));
+const hshelf = (f, f0, g) => g / (1 + Math.pow(f0 / f, 2));
+/* v8: EQ band model. used = the band exists on the spectrum, on = not bypassed. */
+const EQTYPES = n => n === 1 ? ['Low shelf', 'Low cut'] : n === 10 ? ['High shelf', 'High cut'] : ['Bell', 'Low shelf', 'High shelf', 'Notch'];
+const PLACES = ['Stereo', 'Mid', 'Side', 'Left', 'Right'];
+const SLOPES = [6, 12, 18, 24, 36, 48];
+const EQB = Array.from({ length: 10 }, (_, i) => ({ n: i + 1, used: 0, on: 1, type: EQTYPES(i + 1)[0], f: [30, 100, 280, 600, 4800, 2000, 5000, 10000, 12000, 16000][i], g: 0, q: 0.71, slope: 24, place: 'Stereo', dyn: 0 }));
+Object.assign(EQB[0], { used: 1, f: 40, g: -1.5 });
+Object.assign(EQB[2], { used: 1, f: 280, g: -2, q: 1.2 });
+Object.assign(EQB[4], { used: 1, type: 'Bell', f: 4800, g: -2.5, q: 2, dyn: 1 });
+Object.assign(EQB[7], { used: 1, type: 'High shelf', f: 10000, g: 1 });
+let SELB = +(P.get('sel') || 5), MENU = P.get('menu') === '1' ? SELB : 0, EDIT = P.get('edit') || '', SNAP = false, EDITV = '';
+if (P.get('demo') === 'lowcut') { Object.assign(EQB[0], { type: 'Low cut', f: 41.2, slope: 24 }); SELB = 1; EDITV = 'E1'; }
+let SPG = null, EDITLOC = P.get('eloc') || 'sp';
+function eqFld(k, v, loc) {
+  return EDIT === k && EDITLOC === loc ? `<span class="fld ed" data-bp="${k}"><input value="${EDITV || v.replace(/ (kHz|Hz|dB)$/, '')}" spellcheck="false"></span>`
+    : `<span class="fld" data-bp="${k}" data-t="eq.field">${v}</span>`;
+}
+const EDHINT = `<div class="bph">Type Hz, kHz or a note, then Enter: 41.2 · 4.8k · E1 · D#2 · Esc cancels</div>`;
+const isCut = b => /cut/.test(b.type);
+function bandDb(b, f) {
+  if (!b.used || !b.on) return 0;
+  switch (b.type) {
+    case 'Bell': return bell(f, b.f, b.g, b.q);
+    case 'Low shelf': return lshelf(f, b.f, b.g);
+    case 'High shelf': return hshelf(f, b.f, b.g);
+    case 'Notch': return Math.max(-30, gauss(f, b.f, -30, 0.12 / b.q));
+    case 'Low cut': return Math.max(-60, hp(f, b.f, b.slope / 6));
+    case 'High cut': return Math.max(-60, lp(f, b.f, b.slope / 6));
+  }
+  return 0;
+}
+const eqC = f => hp(f, 25, 4) + EQB.reduce((a, b) => a + bandDb(b, f), 0);
+const fmtHz = f => f >= 1000 ? (f / 1000).toFixed(f >= 10000 ? 1 : 2) + ' kHz' : f.toFixed(f < 100 ? 1 : 0) + ' Hz';
+const noteF = f => { const n = note(f); return `${n.name} ${n.cents >= 0 ? '+' : '−'}${Math.abs(n.cents)} ct`; };
+const snapF = f => 440 * Math.pow(2, Math.round(12 * Math.log2(f / 440)) / 12);
+function parseFreq(t) {
+  t = t.trim().replace(',', '.');
+  const nm = /^([A-Ga-g])(#|b)?\s*(-?\d)$/.exec(t);
+  if (nm) { const idx = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }[nm[1].toUpperCase()] + (nm[2] === '#' ? 1 : nm[2] === 'b' ? -1 : 0); return 440 * Math.pow(2, ((+nm[3] + 1) * 12 + idx - 69) / 12); }
+  const hz = /^(\d+(?:\.\d+)?)\s*(k|khz|hz)?$/i.exec(t);
+  if (hz) return +hz[1] * (/^k/i.test(hz[2] || '') ? 1000 : 1);
+  return NaN;
+}
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+function note(f) { const n = 12 * Math.log2(f / 440) + 69, r = Math.round(n), c = Math.round((n - r) * 100); return { name: NOTES[(r % 12 + 12) % 12] + (Math.floor(r / 12) - 1), cents: c }; }
+const m = x => (x < 0 ? '−' : '+') + Math.abs(x).toFixed(1);
+const mn = (x, d = 1) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+function path(fn, w, h, y0, y1, lo = 20, hi = 20000, steps = 360) {
+  let d = '';
+  for (let i = 0; i <= steps; i++) {
+    const f = lo * Math.pow(hi / lo, i / steps), x = fx(f, w, lo, hi);
+    const y = (y0 - fn(f)) / (y0 - y1) * h;
+    d += (i ? 'L' : 'M') + x.toFixed(1) + ' ' + Math.max(-50, Math.min(h + 50, y)).toFixed(1);
+  }
+  return d;
+}
+/* v6: o.meter = { lv: signal 0..1 on the knob scale, inv: true when the module acts BELOW the
+   threshold (correlation guard) }. Threshold knobs get it automatically from THRM. */
+const THRM = { 'eq.thr': { lv: .70 }, 'bc.thr': { lv: .66 }, 'cl.thr': { lv: .86 }, 'st.guard': { lv: .81, inv: 1 } };
+function knob(v, label, val, o = {}) {
+  const s = o.size || 32, col = o.col || 'var(--orange)', mt = o.meter || THRM[o.id];
+  const sw = Math.max(3.5, s * 0.075), mw = Math.max(2.5, s * 0.06), r = s / 2 - 3 * Math.max(1, s / 48);
+  const rr = r + sw / 2 + mw / 2 + Math.max(1, s / 40), M = mt ? Math.ceil(rr + mw / 2 - s / 2 + 0.5) : 0, S = s + 2 * M, c = S / 2;
+  const P2 = (a, R) => [c + R * Math.sin(a * Math.PI / 180), c - R * Math.cos(a * Math.PI / 180)];
+  const arc = (a, b, R = r) => { const [x0, y0] = P2(a, R), [x1, y1] = P2(b, R); return `M${x0.toFixed(2)} ${y0.toFixed(2)}A${R} ${R} 0 ${b - a > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`; };
+  const a = -135 + 270 * v, from = o.bi ? Math.min(0, a) : -135, to = o.bi ? Math.max(0, a) : a;
+  const [px, py] = P2(a, r - 7 * s / 32);
+  let ring = '';
+  if (mt) {
+    const la = -135 + 270 * Math.max(0, Math.min(1, mt.lv)), seg = (x, y, cl) => y - x > 0.5 ? `<path d="${arc(x, y, rr)}" stroke="${cl}" stroke-width="${mw}" fill="none"/>` : '';
+    ring = `<path d="${arc(-135, 135, rr)}" stroke="#20252d" stroke-width="${mw}" fill="none"/>`;
+    if (mt.inv) ring += seg(-135, la, la < a ? 'var(--bad)' : 'var(--ok)');
+    else ring += seg(-135, Math.min(la, a), 'var(--ok)') + seg(a, la, 'var(--bad)');
+    const [t0x, t0y] = P2(a, rr - mw / 2 - 1), [t1x, t1y] = P2(a, rr + mw / 2 + 1);
+    ring += `<line x1="${t0x.toFixed(2)}" y1="${t0y.toFixed(2)}" x2="${t1x.toFixed(2)}" y2="${t1y.toFixed(2)}" stroke="#fff" stroke-width="${Math.max(1.5, s / 32)}"/>`;
+  }
+  return `<div class="knob" data-k="${o.id || ''}"${mt ? ` data-meter="${mt.inv ? 'inv' : '1'}"` : ''}><svg width="${S}" height="${S}"${M ? ` style="margin:-${M}px -${M}px ${-M}px"` : ''}>${ring}<path d="${arc(-135, 135)}" stroke="#2b313b" stroke-width="${sw}" fill="none" stroke-linecap="round"/>${to - from > 0.5 ? `<path d="${arc(from, to)}" stroke="${col}" stroke-width="${sw}" fill="none" stroke-linecap="round"/>` : ''}<circle cx="${c}" cy="${c}" r="${r - 6 * s / 32}" fill="#2a2f39" stroke="#3a414d"/><line x1="${c}" y1="${c}" x2="${px.toFixed(2)}" y2="${py.toFixed(2)}" stroke="#e8eaee" stroke-width="${Math.max(2, s / 16)}" stroke-linecap="round"/></svg><div class="kv">${val}</div><div class="kl">${label}</div></div>`;
+}
+const light = (s) => `<span class="light ${s}">${{ ok: '✓', warn: '!', bad: '✕', info: 'i' }[s]}</span>`;
+const COL = { ok: 'var(--ok)', warn: 'var(--warn)', bad: 'var(--bad)', info: 'var(--info)' };
+
+/* ---------- top bar ---------- */
+function topBar() {
+  if (COMPACT) return `
+  <div class="top">
+    <div class="logo">M<b>M</b></div>
+    <div class="grp"><span class="dd" style="width:116px"><span class="tx">Djent Low-End Focus</span><span class="mod">*</span><span class="car">▾</span></span></div>
+    <div class="grp"><span class="btn tog">Bypass</span></div>
+    <div class="grp monGrp ${MON ? 'active' : ''}"><span class="monBadge">MONITOR ON</span><span class="dd">${MON ? 'Phones' : 'Monitor: Off'}<span class="car">▾</span></span></div>
+    <span class="spacer"></span>
+    <div class="grp meters" style="gap:8px;padding:0 6px"><span class="mtr"><span class="v" style="font-size:13px">−8.4</span><span class="u">LUFS</span></span><span class="mtr"><span class="dot" style="background:var(--ok)"></span><span class="v" style="font-size:13px">−1.1</span><span class="u">dBTP</span></span></div>
+    <span class="btn size">Custom</span>
+  </div>`;
+  return `
+  <div class="top">
+    <div class="logo">Master<b>Mind</b></div>
+    <div class="grp"><span class="btn ic">‹</span><span class="btn ic">›</span><span class="dd" style="width:116px"><span class="tx">Djent Low-End Focus</span><span class="mod">*</span><span class="car">▾</span></span><span class="btn">Save</span><span class="btn">Save As</span></div>
+    <div class="grp"><span class="btn tog">Bypass</span><span class="btn tog on">Match</span></div>
+    <div class="grp monGrp ${MON ? 'active' : ''}"><span class="monBadge">MONITOR ON</span><span class="dd">${MON ? 'Phones' : 'Monitor: Off'}<span class="car">▾</span></span><span class="dd">${MON ? 'Laptop' : 'System: Off'}<span class="car">▾</span></span></div>
+    <div class="grp" title="Reference tracks"><span class="ref sel">1</span><span class="ref">2</span><span class="ref">3</span><span class="ref">4</span><span class="ref empty">5</span><span class="ref empty">6</span><span class="seg" style="margin-left:3px"><span class="on">A</span><span>B</span></span></div>
+    <span class="spacer"></span>
+    <div class="grp meters"><span class="mtr"><span class="k">S-T</span><span class="v">−8.4</span></span><span class="mtr"><span class="k">TP</span><span class="v" style="color:var(--ok)">−1.1</span></span><span class="mtr"><span class="k">PLR</span><span class="v" style="color:var(--warn)">7.8</span></span></div>
+    <span class="btn size">${SIZE}%</span>
+  </div>`;
+}
+
+function tabs(active) {
+  const names = COMPACT ? ['Overview', 'Master', 'Eyes', 'More ▾'] : ['Master', 'Eyes', 'Low-End', 'Stereo', 'Spectrogram', 'Album'];
+  return `<div class="tabs">${names.map(n => `<div class="tab ${n === active ? 'on' : ''}">${n}</div>`).join('')}
+    <div class="right">${COMPACT ? `<span class="seg"><span>In</span><span class="on">Out</span><span>Both</span></span><span class="btn">Reset</span>` :
+    `<span>Analyse</span><span class="seg"><span>In</span><span>Out</span><span class="on">Both</span></span><span class="btn">Reset</span><span class="chk"><i>✓</i>Reset on play</span>`}</div></div>`;
+}
+
+function footer() {
+  return `<div class="foot"><span>MasterMind 0.1.14 (a1b2c3d)</span><div class="right"><span>CPU 6.2%</span><span>Latency 96 samples (2.00 ms)</span><span>48 kHz</span></div><div class="grip"></div></div>`;
+}
+
+/* ---------- spectrum ---------- */
+function spectrumSVG(w, h, o = {}) {
+  const y0 = -6, y1 = -60, axisH = o.compact ? 16 : 18, bandH = o.compact ? 0 : 16, gh = h - axisH - bandH;
+  const left = o.compact ? 0 : 30, right = o.compact ? 28 : 36, gw = w - left - right;
+  const X = f => left + fx(f, gw), Y = db => (y0 - db) / (y0 - y1) * gh;
+  let s = `<svg width="${w}" height="${h}" style="display:block"${o.eq ? ' data-spec="1"' : ''}>`;
+  s += `<defs><linearGradient id="og" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff9f43" stop-opacity=".18"/><stop offset="1" stop-color="#ff9f43" stop-opacity="0"/></linearGradient><clipPath id="gc"><rect x="${left}" y="0" width="${gw}" height="${gh}"/></clipPath></defs>`;
+  s += `<rect x="${left}" y="0" width="${gw}" height="${gh}" fill="#0d0f13"/>`;
+  const fl = [20, 30, 40, 50, 60, 70, 80, 90, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 20000];
+  fl.forEach(f => { const major = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000].includes(f); s += `<line x1="${X(f)}" x2="${X(f)}" y1="0" y2="${gh}" stroke="${major ? '#252a33' : '#191c22'}"/>`; });
+  for (let d = -12; d >= -54; d -= 12) s += `<line x1="${left}" x2="${left + gw}" y1="${Y(d)}" y2="${Y(d)}" stroke="#222730"/><text x="${left + gw + 5}" y="${Y(d) + 4}" fill="#6f7786" font-size="12">${d}</text>`;
+  [[20, '20'], [50, '50'], [100, '100'], [200, '200'], [500, '500'], [1000, '1k'], [2000, '2k'], [5000, '5k'], [10000, '10k'], [20000, '20k']].forEach(([f, t], i, a) => {
+    if (o.compact && [50, 200, 2000].includes(f)) return;
+    const anchor = i === 0 ? 'start' : i === a.length - 1 ? 'end' : 'middle';
+    s += `<text x="${X(f)}" y="${gh + 13}" fill="#6f7786" font-size="12" text-anchor="${anchor}">${t}</text>`;
+  });
+  if (bandH) {
+    const bands = [['Sub', 20, 60], ['Bass', 60, 150], ['Low-mid', 150, 500], ['Mid', 500, 2000], ['Presence', 2000, 6000], ['Air', 6000, 16000]];
+    bands.forEach(([n, a, b], i) => { const xa = X(a), xb = X(b); s += `<rect x="${xa + 1}" y="${gh + axisH}" width="${xb - xa - 2}" height="${bandH - 2}" rx="3" fill="${i % 2 ? '#1a1e25' : '#1e232b'}"/><text x="${(xa + xb) / 2}" y="${gh + axisH + 11}" fill="#8b93a1" font-size="12" text-anchor="middle">${n}</text>`; });
+  }
+  s += `<g clip-path="url(#gc)" transform="translate(${left} 0)">`;
+  const up = f => target(f) + corW(f), dn = f => target(f) - corW(f);
+  let cor = path(up, gw, gh, y0, y1);
+  const back = path(dn, gw, gh, y0, y1).slice(1).split('L').reverse().join('L');
+  s += `<path d="${cor}L${back}Z" fill="rgba(78,161,255,.13)" stroke="rgba(78,161,255,.35)" stroke-width="1"/>`;
+  s += `<path d="${path(target, gw, gh, y0, y1)}" stroke="#a9cdff" stroke-width="1.3" stroke-dasharray="5 4" fill="none"/>`;
+  if (!o.compact) s += `<path d="${path(inC, gw, gh, y0, y1)}" stroke="#5f86b8" stroke-width="1.3" fill="none" opacity=".9"/>`;
+  s += `<path d="${path(peakC, gw, gh, y0, y1)}" stroke="#ff9f43" stroke-width="1" fill="none" opacity=".35"/>`;
+  const op = path(outC, gw, gh, y0, y1);
+  s += `<path d="${op}L${gw} ${gh}L0 ${gh}Z" fill="url(#og)"/><path d="${op}" stroke="#ff9f43" stroke-width="2" fill="none"/>`;
+  if (o.eq) {
+    const ey = g => gh * 0.42 - g / 12 * gh * 0.32;
+    SPG = { left, gw, gh, w, h, ey };
+    s += `<line x1="0" x2="${gw}" y1="${ey(0)}" y2="${ey(0)}" stroke="#ffd84d" stroke-opacity=".25" stroke-dasharray="2 4"/>`;
+    let d = ''; for (let i = 0; i <= 360; i++) { const f = 20 * Math.pow(1000, i / 360); d += (i ? 'L' : 'M') + fx(f, gw).toFixed(1) + ' ' + ey(Math.max(-30, eqC(f))).toFixed(1); }
+    s += `<path d="${d}L${gw} ${ey(0)}L0 ${ey(0)}Z" fill="rgba(255,216,77,.10)"/><path d="${d}" stroke="#ffd84d" stroke-width="2" fill="none"/>`;
+    EQB.filter(b => b.used && b.on && b.dyn && !isCut(b)).forEach(b => {
+      const lo = b.f / 4, hi = Math.min(20000, b.f * 4), dyn = Object.assign({}, b, { g: b.g - 1.5 });
+      let dd = ''; for (let i = 0; i <= 120; i++) { const f = lo * Math.pow(hi / lo, i / 120); dd += (i ? 'L' : 'M') + fx(f, gw).toFixed(1) + ' ' + ey(eqC(f) - bandDb(b, f) + bandDb(dyn, f)).toFixed(1); }
+      s += `<path d="${dd}" stroke="#ffd84d" stroke-width="1.2" stroke-dasharray="4 3" fill="none" opacity=".7"/>`;
+    });
+    if (SELB && EQB[SELB - 1].used) {
+      const b = EQB[SELB - 1]; let sd = '';
+      for (let i = 0; i <= 240; i++) { const f = 20 * Math.pow(1000, i / 240); sd += (i ? 'L' : 'M') + fx(f, gw).toFixed(1) + ' ' + ey(Math.max(-30, bandDb(b, f))).toFixed(1); }
+      s += `<path d="${sd}" stroke="#fff" stroke-opacity=".35" stroke-width="1.2" fill="none"/>`;
+    }
+  }
+  s += `</g>`;
+  if (o.eq) {
+    const ey = SPG.ey;
+    [12, 6, 0, -6, -12].forEach(g => s += `<text x="${left - 5}" y="${ey(g) + 4}" fill="#b9a24a" font-size="12" text-anchor="end">${g > 0 ? '+' + g : g === 0 ? '0' : '−' + (-g)}</text>`);
+    s += `<text x="${left + gw - 8}" y="${gh - 7}" fill="#6f7786" font-size="11" text-anchor="end" data-t="eq.add">Double-click: add a band · at the edges: low cut / high cut</text>`;
+    s += `<g transform="translate(${left} 0)">`;
+    EQB.filter(b => b.used).forEach(b => {
+      const x = Math.max(9, Math.min(gw - 9, fx(b.f, gw))), y = Math.max(10, Math.min(gh - 10, ey(isCut(b) || b.type === 'Notch' ? 0 : b.g))), sel = b.n === SELB;
+      const fill = sel ? '#ffd84d' : '#1b1d21', st = b.on ? '#ffd84d' : '#7d7250';
+      s += `<g data-t="eq.node" data-n="${b.n}" data-band="${b.n}" style="cursor:grab"${b.on ? '' : ' opacity=".6"'}>${sel ? `<circle cx="${x}" cy="${y}" r="15" fill="#ffd84d" opacity=".18"/>` : ''}<circle cx="${x}" cy="${y}" r="${sel ? 10 : 8}" fill="${b.on ? fill : '#1b1d21'}" stroke="${st}" stroke-width="2"${b.on ? '' : ' stroke-dasharray="3 2"'}/><text x="${x}" y="${y + 4}" font-size="12" font-weight="700" text-anchor="middle" fill="${sel && b.on ? '#1b1600' : st}">${b.n}</text></g>`;
+    });
+    s += `</g>`;
+  }
+  // cursor readout with note name
+  const cf = 46.2, cx = X(cf), cy = Y(outC(cf)), nn = note(cf);
+  s += `<line x1="${cx}" x2="${cx}" y1="0" y2="${gh}" stroke="#e8eaee" stroke-opacity=".45" stroke-dasharray="3 3"/><circle cx="${cx}" cy="${cy}" r="4" fill="#fff"/>`;
+  const bw = o.compact ? 132 : 158;
+  s += `<g transform="translate(${cx + 10} ${Math.max(6, cy - 46)})"><rect width="${bw}" height="38" rx="6" fill="#f2f4f7"/><text x="9" y="16" fill="#15171b" font-size="12" font-weight="700">${cf.toFixed(1)} Hz · ${nn.name} ${nn.cents >= 0 ? '+' : '−'}${Math.abs(nn.cents)} ct</text><text x="9" y="31" fill="#3b414c" font-size="12">${mn(outC(cf))} dB (out)</text></g>`;
+  return s + `</svg>`;
+}
+
+function spectrumPanel(w, h) {
+  const head = `<div class="ph"><h3>Spectrum</h3>
+    <div class="legend"><span><i class="sw" style="background:#5f86b8"></i>In</span><span><i class="sw" style="background:var(--orange)"></i>Out</span><span><i class="sw" style="background:rgba(78,161,255,.45);height:8px"></i>Ref corridor (R1–R4)</span><span><i class="sw" style="background:var(--yellow)"></i>EQ</span></div>
+    <div class="right"><span class="seg"><span class="on">Real-time</span><span>Average</span><span>Peak hold</span></span><span class="dd">FFT 8192<span class="car">▾</span></span><span class="dd">1/3 oct<span class="car">▾</span></span><span class="dd">Tilt 4.5 dB/oct<span class="car">▾</span></span><span class="dd">Stereo<span class="car">▾</span></span><span class="seg"><span class="on">Curve</span><span>Delta</span></span></div></div>`;
+  return `<div class="panel" style="height:${h}px">${head}<div style="padding:8px 4px 4px 4px">${spectrumSVG(w - 10, h - 32 - 14, { eq: true })}</div></div>`;
+}
+
+/* ---------- module strip ---------- */
+function card(name, w, on, body, right = '', cur = false) {
+  return `<div class="card ${on ? '' : 'off'} ${cur ? 'cur' : ''}"><div class="chd"><span class="led ${on ? 'on' : ''}"></span><b>${name}</b><span class="r">${on ? right : 'Bypassed'}</span></div><div class="cbd">${body}</div></div>`;
+}
+function grbar(lbl, v, hl) { return `<div class="grbar"><div class="t" ${hl ? 'style="border-color:var(--orange)"' : ''}><i style="height:${v}%"></i></div><span class="mini">${lbl}</span></div>`; }
+const STRIP_H = 310;
+function moduleStrip() {
+  const row1 = [
+    card('Input', 186, 1, knob(.5, 'Trim', '0.0 dB', { id: 'in.trim', bi: 1 }) + knob(.22, 'Subsonic', '25 Hz', { id: 'in.sub', col: 'var(--yellow)' }) + knob(.5, 'Slope', '24 dB/o', { id: 'in.slope', col: 'var(--text2)' }) + `<div class="row"><span class="btn">Ø L</span><span class="btn">Ø R</span><span class="mini">DC block on</span></div>`),
+    card('Dynamic EQ', 262, 1, `<div class="bandchips">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<span class="${n === 5 ? 's' : [1, 3, 8].includes(n) ? 'a' : ''}">${n}</span>`).join('')}</div>` + knob(.72, 'Freq', '4.80 kHz', { id: 'eq.freq', col: 'var(--yellow)' }) + knob(.43, 'Gain', '−2.5 dB', { id: 'eq.gain', bi: 1, col: 'var(--yellow)' }) + knob(.35, 'Q', '2.0', { id: 'eq.q', col: 'var(--yellow)' }) + knob(.6, 'Thresh', '−24 dB', { id: 'eq.thr', col: 'var(--yellow)' }), 'Min phase', true),
+    card('Multiband', 220, 0, `<div class="row bars" style="justify-content:space-between">${grbar('<80', 40, 1)}${grbar('250', 18)}${grbar('1.5k', 10)}${grbar('5.5k', 22)}${grbar('>5.5k', 12)}</div><div class="row mini">X-over 80 · 250 · 1.5k · 5.5k</div>`),
+    card('Low-End', 196, 1, knob(.31, 'Mono', '120 Hz', { id: 'le.mono', col: 'var(--blue)' }) + knob(1, 'Amount', '100%', { id: 'le.amount', col: 'var(--blue)' }) + knob(.25, 'Rotate', '90°', { id: 'le.rotate', col: 'var(--blue)' }) + knob(.2, 'Translator', '20%', { id: 'le.trans', col: 'var(--blue)' }), '−'),
+    card('Bus Comp', 236, 1, knob(.55, 'Thresh', '−12 dB', { id: 'bc.thr' }) + knob(.2, 'Ratio', '2:1', { id: 'bc.ratio' }) + knob(.4, 'Attack', '10 ms', { id: 'bc.attack' }) + knob(.5, 'Release', 'Auto', { id: 'bc.release' }) + knob(.4, 'SC HPF', '100 Hz', { id: 'bc.schpf' }) + knob(1, 'Mix', '100%', { id: 'bc.mix' }) + `<div class="row mini" style="justify-content:space-between"><span>VCA</span><span>GR <b style="color:var(--orange)">−1.4 dB</b></span></div>`, 'VCA'),
+  ].join('');
+  const row2 = [
+    card('Saturation', 170, 0, knob(.3, 'Low', '4.0 dB', { id: 'sat.low' }) + knob(.1, 'Mid', '1.0 dB', { id: 'sat.mid' }) + knob(.0, 'High', '0.0 dB', { id: 'sat.high' })),
+    card('Stereo', 160, 0, knob(.5, 'Mid width', '100%', { id: 'st.mid' }) + knob(.5, 'High width', '100%', { id: 'st.high' })),
+    card('Clipper', 150, 1, knob(.75, 'Thresh', '−1.5 dB', { id: 'cl.thr', col: 'var(--magenta)' }) + knob(1, 'Mix', '100%', { id: 'cl.mix', col: 'var(--magenta)' }) + `<div class="row mini" style="justify-content:space-between"><span class="dd">Soft<span class="car">▾</span></span><span>Peak <b style="color:var(--orange)">−2.1 dB</b></span></div>`, 'Low protect'),
+    card('Limiter', 250, 1, knob(.25, 'Drive', '+6.0 dB', { id: 'li.drive', col: 'var(--magenta)' }) + knob(.67, 'Ceiling', '−1.0 dBTP', { id: 'li.ceil', col: 'var(--magenta)' }) + knob(.5, 'Release', 'Auto', { id: 'li.rel', col: 'var(--magenta)' }) + knob(.33, 'Lookahead', '2.0 ms', { id: 'li.la', col: 'var(--magenta)' }) + `<div class="row mini" style="justify-content:space-between"><span class="dd">Balanced<span class="car">▾</span></span><span>GR <b style="color:var(--orange)">−3.2 dB</b></span></div>`, 'True peak'),
+    card('Output', 130, 1, knob(.5, 'Gain', '0.0 dB', { id: 'out.gain', bi: 1 }) + `<div style="display:flex;flex-direction:column;gap:6px;justify-content:center"><span class="dd">Dither: Off<span class="car">▾</span></span><span class="mini">Out TP <b style="color:var(--ok)">−1.1</b></span></div>`),
+  ].join('');
+  return `<div class="panel strip" style="height:${STRIP_H}px"><div class="ph"><h3>Signal chain</h3><span class="sub">10 modules, fixed order: left to right, top to bottom</span><div class="right"><span class="mini">Chain latency 96 smp</span></div></div><div class="cards"><div class="crow">${row1}</div><div class="crow">${row2}</div></div></div>`;
+}
+
+/* ---------- eyes ---------- */
+const TB = [['Sub', '20–60 Hz', 2.9, 1.6], ['Bass', '60–150 Hz', 0.6, 1.3], ['Low-mid', '150–500 Hz', -1.3, 1.2], ['Mid', '0.5–2 kHz', 0.2, 1.0], ['Presence', '2–6 kHz', 0.8, 1.1], ['Air', '6–16 kHz', -1.6, 1.8]];
+const status = v => Math.abs(v) <= 1 ? 'ok' : Math.abs(v) <= 2.5 ? 'warn' : 'bad';
+function tonalPanel() {
+  const R = 6, pos = v => 50 + v / R * 50;
+  const rows = TB.map(([n, r, v, c], i) => {
+    const st = status(v), a = Math.min(pos(0), pos(v)), b = Math.max(pos(0), pos(v));
+    return `<div class="tbrow"${tbAttr(i, v)}><div class="n"><b>${n}</b><span>${r}</span></div><div class="track"><div class="cor" style="left:${pos(-c)}%;width:${pos(c) - pos(-c)}%"></div><div class="zero"></div><div class="val" style="left:${a}%;width:${b - a}%;background:${COL[st]};opacity:.55"></div><div class="mk" style="left:${pos(v)}%;background:${COL[st]}"></div></div><div class="num" style="color:${COL[st]}">${m(v)} dB</div>${light(st)}</div>`;
+  }).join('');
+  return `<div class="panel" style="grid-column:1;grid-row:1"><div class="ph"><h3>Tonal balance</h3><span class="sub">vs target</span><div class="right"><span class="seg"><span class="on">Integrated</span><span>Last 10 s</span></span><span class="dd">Target: Ref set (4)<span class="car">▾</span></span></div></div>
+  <div class="tb"><div class="scale"><div></div><div class="s"><span>−6 dB</span><span>−3</span><span>target</span><span>+3</span><span>+6 dB</span></div><div></div><div></div></div>${rows}
+  <div class="sentence"><b>Sub +2.9 dB</b> vs target · <b>Air −1.6 dB</b> vs target · <b>Low-mid −1.3 dB</b> vs target</div></div></div>`;
+}
+function loudnessPanel() {
+  const w = 400, h = 92; const r = rng(3); let d = '', pts = [];
+  for (let i = 0; i <= 120; i++) { const t = i / 120; let v = t < 0.12 ? -22 + t / 0.12 * 12 : -8.6 + 1.2 * Math.sin(t * 19) + (r() - .5) * 1.6; if (t > 0.55 && t < 0.63) v -= 5; pts.push(v); }
+  const Y = v => (-4 - v) / 26 * h;
+  pts.forEach((v, i) => d += (i ? 'L' : 'M') + (i / 120 * w).toFixed(1) + ' ' + Y(v).toFixed(1));
+  const svg = `<svg width="100%" height="${h + 14}" viewBox="0 0 ${w + 34} ${h + 14}" preserveAspectRatio="none" style="display:block"><rect width="${w}" height="${h}" fill="#0d0f13"/>${[-8, -14, -20, -26].map(v => `<line x1="0" x2="${w}" y1="${Y(v)}" y2="${Y(v)}" stroke="#222730"/><text x="${w + 4}" y="${Y(v) + 4}" fill="#6f7786" font-size="12">${v === 0 ? 0 : '−' + (-v)}</text>`).join('')}<line x1="0" x2="${w}" y1="${Y(-14)}" y2="${Y(-14)}" stroke="#7fb3ff" stroke-dasharray="5 4"/><text x="6" y="${Y(-14) - 4}" fill="#7fb3ff" font-size="12">−14 LUFS streaming reference (info only)</text><path d="${d}L${w} ${h}L0 ${h}Z" fill="rgba(255,159,67,.14)"/><path d="${d}" stroke="#ff9f43" stroke-width="1.6" fill="none"/><text x="0" y="${h + 12}" fill="#6f7786" font-size="12">−60 s</text><text x="${w}" y="${h + 12}" fill="#6f7786" font-size="12" text-anchor="end">now</text></svg>`;
+  return `<div class="panel" style="grid-column:2;grid-row:1"><div class="ph"><h3>Loudness</h3><span class="sub">BS.1770 / EBU R128</span><div class="right"><span class="dd">Target: Streaming ref<span class="car">▾</span></span></div></div>
+  <div class="ld"><div class="big"><div class="bigv main"><div class="k">Integrated</div><div class="v">−8.9<span class="u">LUFS</span></div></div><div class="bigv"><div class="k">Short-term</div><div class="v">−8.4<span class="u">LUFS</span></div></div><div class="bigv"><div class="k">Momentary</div><div class="v">−7.6<span class="u">LUFS</span></div></div></div>
+  <div class="kv4"><div class="kvc"><div class="k">LRA</div><div class="v">4.2 <small>LU</small></div></div><div class="kvc"><div class="k">True peak</div><div class="v" style="color:var(--ok)">−1.1 <small>dBTP</small></div></div><div class="kvc"><div class="k">PLR</div><div class="v" style="color:var(--warn)">7.8 <small>LU</small></div></div><div class="kvc"><div class="k">PSR</div><div class="v">7.3 <small>LU</small></div></div>
+  <div class="kvc"><div class="k">Sample peak</div><div class="v">−1.3 <small>dBFS</small></div></div><div class="kvc"><div class="k">Crest</div><div class="v">9.6 <small>dB</small></div></div><div class="kvc"><div class="k">Overs</div><div class="v">0</div></div><div class="kvc"><div class="k">TP overs</div><div class="v" style="color:var(--warn)">3</div></div></div>
+  <div style="flex:1;min-height:0;display:flex;flex-direction:column;justify-content:flex-end"><div class="mini" style="margin-bottom:3px">Short-term history</div>${svg}</div></div></div>`;
+}
+function lowEndPanel() {
+  const w = 452, h = 128, lo = 20, hi = 200, y0 = -8, y1 = -48;
+  const X = f => fx(f, w, lo, hi), Y = v => (y0 - v) / (y0 - y1) * h;
+  const mid = f => -22 + gauss(f, 46.2, 7, 0.08) + gauss(f, 55, 4.5, 0.1) + gauss(f, 92, 3, 0.12) + hp(f, 28, 3) - (f > 120 ? (f - 120) / 40 : 0) + rip(f * 3, 2) * 0.8;
+  const side = f => mid(f) - 18 + (f > 100 ? (f - 100) / 12 : 0) - gauss(f, 46, 6, 0.1);
+  let s = `<svg width="${w + 30}" height="${h + 16}" style="display:block"><rect width="${w}" height="${h}" fill="#0d0f13"/>`;
+  [20, 30, 40, 50, 60, 80, 100, 150, 200].forEach(f => s += `<line x1="${X(f)}" x2="${X(f)}" y1="0" y2="${h}" stroke="#1f232a"/><text x="${X(f)}" y="${h + 13}" fill="#6f7786" font-size="12" text-anchor="${f === 20 ? 'start' : f === 200 ? 'end' : 'middle'}">${f}</text>`);
+  [-18, -28, -38].forEach(v => s += `<line x1="0" x2="${w}" y1="${Y(v)}" y2="${Y(v)}" stroke="#1f232a"/><text x="${w + 4}" y="${Y(v) + 4}" fill="#6f7786" font-size="12">−${-v}</text>`);
+  s += `<line x1="${X(120)}" x2="${X(120)}" y1="0" y2="${h}" stroke="#4ea1ff" stroke-dasharray="4 3"/><text x="${X(120) + 4}" y="12" fill="#4ea1ff" font-size="12">mono below 120 Hz</text>`;
+  const p = fn => { let d = ''; for (let i = 0; i <= 240; i++) { const f = lo * Math.pow(hi / lo, i / 240); d += (i ? 'L' : 'M') + X(f).toFixed(1) + ' ' + Math.min(h, Y(fn(f))).toFixed(1); } return d; };
+  s += `<path d="${p(mid)}L${w} ${h}L0 ${h}Z" fill="rgba(255,159,67,.16)"/><path d="${p(mid)}" stroke="#ff9f43" stroke-width="1.8" fill="none"/><path d="${p(side)}" stroke="#e35bd8" stroke-width="1.5" fill="none"/>`;
+  [[46.2, 'F#1 46 Hz'], [55, 'A1 55 Hz']].forEach(([f, t], i) => { const x = X(f), y = Y(mid(f)); s += `<circle cx="${x}" cy="${y}" r="3" fill="#fff"/><text x="${x + (i ? 6 : -6)}" y="${y - 6}" fill="#fff" font-size="12" font-weight="600" text-anchor="${i ? 'start' : 'end'}">${t}</text>`; });
+  s += `</svg>`;
+  // low band waveform
+  const ww = w, wh = 40; let up = '', dn = ''; const r = rng(11);
+  for (let i = 0; i <= 160; i++) { const t = i / 160, env = 0.55 + 0.35 * Math.abs(Math.sin(t * 13)) * (0.7 + 0.3 * r()); up += (i ? 'L' : 'M') + (t * ww).toFixed(1) + ' ' + (wh / 2 - env * wh / 2 * 0.95).toFixed(1); dn = 'L' + (t * ww).toFixed(1) + ' ' + (wh / 2 + env * 0.78 * wh / 2 * 0.95).toFixed(1) + dn; }
+  const wave = `<svg width="${ww + 30}" height="${wh}" style="display:block"><rect width="${ww}" height="${wh}" fill="#0d0f13"/><line x1="0" x2="${ww}" y1="${wh / 2}" y2="${wh / 2}" stroke="#2a2f39"/><path d="${up}${dn.replace(/^L/, 'L')}Z" fill="rgba(78,161,255,.45)" stroke="#4ea1ff" stroke-width="1"/></svg>`;
+  return `<div class="panel" style="grid-column:1;grid-row:2"><div class="ph"><h3>Low end</h3><span class="sub">20–200 Hz, 1/12 oct</span><div class="legend" style="margin-left:6px"><span><i class="sw" style="background:var(--orange)"></i>Mid</span><span><i class="sw" style="background:var(--magenta)"></i>Side</span></div><div class="right"><span class="btn">Open Low-End tab</span></div></div>
+  <div style="padding:8px 12px 6px">${s}<div class="mini" style="margin:6px 0 3px">Low band 20–150 Hz, last 2 s</div>${wave}
+  <div class="kv4" style="margin-top:8px"><div class="kvc"><div class="k">Correlation &lt;150</div><div class="v" style="color:var(--ok)">+0.96</div></div><div class="kvc"><div class="k">Mono loss &lt;120</div><div class="v" style="color:var(--ok)">−0.2 <small>dB</small></div></div><div class="kvc"><div class="k">Sub / Bass</div><div class="v" style="color:var(--warn)">+1.4 <small>dB vs ref</small></div></div><div class="kvc"><div class="k">Peak asymmetry</div><div class="v">+18 <small>%</small></div></div></div></div></div>`;
+}
+function stereoPanel() {
+  const S = 168, c = S / 2, r = rng(5); let dots = '';
+  for (let i = 0; i < 1300; i++) { const g = () => (r() + r() + r() - 1.5) / 1.5; const mid = g() * 0.62, side = g() * 0.24; const x = c + side * c * 0.95, y = c - mid * c * 0.95; dots += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="1" fill="#ff9f43" opacity="${(0.25 + r() * 0.5).toFixed(2)}"/>`; }
+  const vs = `<svg width="${S}" height="${S + 4}" style="flex:none"><rect width="${S}" height="${S}" rx="6" fill="#0d0f13"/><circle cx="${c}" cy="${c}" r="${c - 6}" fill="none" stroke="#262b34"/><line x1="${c}" y1="6" x2="${c}" y2="${S - 6}" stroke="#262b34"/><line x1="6" y1="${c}" x2="${S - 6}" y2="${c}" stroke="#262b34"/><line x1="${c - 55}" y1="${c - 55}" x2="${c + 55}" y2="${c + 55}" stroke="#1f232a"/><line x1="${c + 55}" y1="${c - 55}" x2="${c - 55}" y2="${c + 55}" stroke="#1f232a"/>${dots}<text x="${c}" y="18" fill="#6f7786" font-size="12" text-anchor="middle">M</text><text x="${c - 60}" y="${c - 50}" fill="#6f7786" font-size="12">L</text><text x="${c + 52}" y="${c - 50}" fill="#6f7786" font-size="12">R</text><text x="10" y="${c + 4}" fill="#6f7786" font-size="12">−S</text><text x="${S - 10}" y="${c + 4}" fill="#6f7786" font-size="12" text-anchor="end">+S</text></svg>`;
+  const rows = [['< 150 Hz', '+0.97', 'ok', '4%', '−0.1', 'ok'], ['150–500', '+0.82', 'ok', '21%', '−0.5', 'ok'], ['0.5–4 kHz', '+0.55', 'ok', '46%', '−1.3', 'warn'], ['> 4 kHz', '+0.31', 'warn', '64%', '−2.2', 'warn']];
+  return `<div class="panel" style="grid-column:2;grid-row:2"><div class="ph"><h3>Stereo</h3><div class="right"><span class="mini">Balance L/R</span><b>0.2 dB R</b></div></div>
+  <div class="stereo">${vs}<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px"><div><div class="row" style="justify-content:space-between"><span class="mini">Correlation</span><b>+0.58</b></div><div class="corr" style="margin-top:4px"><i style="left:79%"></i></div><div class="cs"><span>−1</span><span>0</span><span>+1</span></div></div>
+  <table class="bt"><tr><th>Band</th><th>Corr</th><th>Width</th><th>Mono loss</th></tr>${rows.map(([b, co, cs, wd, ml, ms]) => `<tr><td>${b}</td><td style="color:${COL[cs]}">${co}</td><td>${wd}</td><td style="color:${COL[ms]}">${ml} dB</td></tr>`).join('')}</table></div></div></div>`;
+}
+const CHECKS = [
+  ['bad', 'Sub', '+2.9 dB', 'Sub-bass above target'],
+  ['ok', 'Bass', '+0.6 dB', 'Within target'],
+  ['warn', 'Low-mid', '−1.3 dB', 'Slightly thin'],
+  ['ok', 'Mid', '+0.2 dB', 'Within target'],
+  ['ok', 'Presence', '+0.8 dB', 'Within target'],
+  ['warn', 'Air', '−1.6 dB', 'A little dark'],
+  ['ok', 'Mono loss', '−0.4 dB', 'Safe on mono phones'],
+  ['ok', 'Low-band corr.', '+0.96', 'Bass is mono-safe'],
+  ['warn', 'PLR', '7.8 LU', 'Dense, check the drums'],
+  ['bad', 'Harshness', '+3.1 dB', '3–8 kHz fizz above ref'],
+  ['ok', 'True peak', '−1.1 dBTP', 'Below ceiling −1.0'],
+  ['info', 'Integrated', '−8.9 LUFS', 'Louder than −14 (info only)'],
+];
+function checksPanel(compact) {
+  const list = (compact ? CHECKS.slice(0, 12) : CHECKS).map(([s, t, v, d], i) => compact
+    ? `<div class="ck"${i < 6 ? tbAttr(i, TB[i][2]) : ''}>${light(s)}<span class="t">${t}</span><span class="v" style="color:${COL[s]}">${v}</span></div>`
+    : `<div class="ck ${TIP && i === 0 ? 'hl' : ''}">${light(s)}<span class="t">${t}</span><span class="v" style="color:${COL[s]}">${v}</span><span class="d">${d}</span></div>`).join('');
+  const style = compact ? 'flex:1' : 'grid-column:3;grid-row:1/3';
+  return `<div class="panel" style="${style}"><div class="ph"><h3>Checks</h3><span class="sub">${compact ? '' : 'independent checks, hover for advice'}</span></div><div class="checks">${list}</div></div>`;
+}
+function tooltip() {
+  return `<div class="tip" id="subTip" style="left:612px;top:142px;display:${TIP ? 'block' : 'none'}"><b>Sub (20–60 Hz): +2.9 dB vs target</b>The lowest octave is clearly louder than in your reference set. On car and club systems the low end will boom and the limiter works harder. Look at the kick and the lowest guitar notes on the Low-End tab.</div>`;
+}
+
+
+/* ---------- v5: Master workspace ---------- */
+const MODS = [
+  ['in', 'Input', 1, 'HPF 25 Hz', 0], ['eq', 'Dyn EQ', 1, '<b>−2.1 dB</b>', 0], ['mb', 'Multiband', 1, '<b>−2.4 dB</b>', 40],
+  ['le', 'Low-End', 1, 'Mono 120', 0], ['bc', 'Bus Comp', 1, '<b>−1.4 dB</b>', 24], ['sat', 'Saturation', 1, 'Max <b>4.0 dB</b>', 0],
+  ['st', 'Stereo', 0, 'Off', 0], ['cl', 'Clipper', 1, '<b>−2.1 dB</b>', 35], ['li', 'Limiter', 1, '<b>−3.2 dB</b>', 53], ['out', 'Output', 1, 'TP −1.1', 0],
+];
+function moduleBar() {
+  return `<div class="mbar">${MODS.map(([k, n, on, st, gr]) => `<div class="tile ${on ? '' : 'off'} ${k === MOD ? 'sel' : ''}" data-mod="${k}" data-t="mod.hdr"><div class="tn"><span class="led ${on ? 'on' : ''}"></span>${n}</div><div class="ts">${st}</div><div class="gr"><i style="width:${gr}%"></i></div></div>`).join('')}</div>`;
+}
+const K = (v, l, val, o = {}) => knob(v, l, val, Object.assign({ size: 30 }, o));
+function edHead(name, sub, right) {
+  const on = (MODS.find(m => m[0] === MOD) || [])[2];
+  return `<div class="ph"><span class="led ${on ? 'on' : ''}"></span><h3>${name}</h3><span class="sub">${sub}</span><div class="right">${right}</div></div>`;
+}
+function mbEditor() {
+  const bands = [['Low', '&lt;80', -2.4, 1, 0], ['Lo-mid', '80–250', -0.8, 0, 0], ['Mid', '250–1.5k', -0.3, 0, 0], ['Hi-mid', '1.5–5.5k', -1.1, 0, 0], ['High', '&gt;5.5k', 0, 0, 1]];
+  const xs = [80, 250, 1500, 5500], pos = f => (Math.log10(f / 20) / 3 * 100).toFixed(2);
+  const edges = [20, ...xs, 20000];
+  const xo = `<div class="xo">${bands.map(([n, r, gr], i) => `<div class="bandseg" style="left:${pos(edges[i])}%;width:${pos(edges[i + 1]) - pos(edges[i])}%;${i ? 'padding-left:44px' : ''}"><div class="grfill" style="height:${Math.min(100, -gr * 14)}%"></div><span style="position:relative"><b>${n}</b> ${gr ? '−' + Math.abs(gr).toFixed(1) : '0.0'} dB</span></div>`).join('')}${xs.map(f => `<div class="h" style="left:${pos(f)}%"><span>${f >= 1000 ? f / 1000 + 'k' : f}</span></div>`).join('')}</div>`;
+  const vals = [[.55, '−26 dB', .3, '3.0:1', .5, '+1.0 dB', .3, '15 ms', .4, '120 ms', .5, '6 dB', 1, '100%', 1, '100%', .5, '0.0 dB'],
+                [.6, '−22 dB', .1, '1.5:1', .5, '0.0 dB', .45, '20 ms', .5, '200 ms', .5, '6 dB', 1, '100%', 1, '100%', .5, '0.0 dB'],
+                [.62, '−20 dB', .1, '1.5:1', .5, '0.0 dB', .45, '20 ms', .5, '200 ms', .5, '6 dB', 1, '100%', 1, '100%', .5, '0.0 dB'],
+                [.58, '−24 dB', .2, '2.0:1', .5, '0.0 dB', .3, '8 ms', .35, '90 ms', .5, '6 dB', .8, '80%', 1, '100%', .5, '0.0 dB'],
+                [.62, '−20 dB', .1, '1.5:1', .5, '0.0 dB', .45, '20 ms', .5, 'Auto', .5, '6 dB', 1, '100%', 1, '100%', .5, '0.0 dB']];
+  const labels = ['Thresh', 'Ratio', 'Makeup', 'Attack', 'Release', 'Knee', 'Mix', 'Link', 'Trim'];
+  const lvl = [.72, .55, .68, .71, .45]; // band signal on the threshold scale (−60 … 0 dB)
+  const cols = bands.map(([n, r, gr, solo, byp], i) => {
+    const v = vals[i];
+    const knobs = labels.map((l, j) => K(v[2 * j], l, v[2 * j + 1], { bi: l === 'Makeup' || l === 'Trim', id: 'mb.' + l.toLowerCase(), col: byp ? 'var(--text3)' : 'var(--orange)', meter: l === 'Thresh' && !byp ? { lv: lvl[i] } : null })).join('');
+    return `<div class="bandcol ${solo ? 'solo' : ''}" style="${byp ? 'opacity:.6' : ''}"><div class="bh"><b>${n}</b><span class="mini">${r}</span><span class="r"><span class="sb ${solo ? 'on' : ''}" data-t="mb.solo">S</span><span class="sb byp ${byp ? 'on' : ''}" data-t="mb.bypass">B</span><span class="sb" data-t="mb.ms">MS</span></span></div><div class="grh">GR<div class="t"><i style="width:${Math.min(100, -gr * 10)}%"></i></div><b>${gr ? '−' + Math.abs(gr).toFixed(1) : '0.0'} dB</b></div><div class="kgrid">${knobs}</div></div>`;
+  }).join('');
+  return `<div class="panel ed">${edHead('Multiband', '5-band dynamics · drag the yellow handles to move the crossovers', `<span class="dd">Linkwitz-Riley<span class="car">▾</span></span><span class="btn">Solo off</span>`)}<div class="edb">${xo}<div class="bands">${cols}</div></div></div>`;
+}
+function bandFields(b) {
+  const gs = isCut(b) ? `<span class="fl">Slope</span><span class="dd" data-bp="slope">${b.slope} dB/oct<span class="car">▾</span></span>`
+    : b.type === 'Notch' ? '' : `<span class="fl">Gain</span>${eqFld('gain', (b.g > 0 ? '+' : b.g < 0 ? '−' : '') + Math.abs(b.g).toFixed(1) + ' dB', 'ed')}`;
+  return `<div class="bfx"><div class="bpr"><span class="fl">Freq</span>${eqFld('freq', fmtHz(b.f), 'ed')}<span class="nt">${noteF(b.f)}</span><span class="btn tog ${SNAP ? 'on' : ''}" data-bp="snap" data-t="eq.snap">♪ Snap</span><span class="btn ic" data-bp="del" data-t="eq.del">✕</span></div>
+    <div class="bpr">${gs}${isCut(b) ? '' : `<span class="fl">Q</span>${eqFld('q', b.q.toFixed(2), 'ed')}`}</div>${EDIT && EDITLOC === 'ed' ? EDHINT : ''}</div>`;
+}
+function eqEditor() {
+  const b = EQB[SELB - 1] && EQB[SELB - 1].used ? EQB[SELB - 1] : EQB.find(x => x.used);
+  const chips = `<div class="chips">${EQB.map(x => `<span class="${x.n === (b && b.n) ? 's' : x.used ? 'a' : ''}" data-chip="${x.n}" style="cursor:pointer">${x.n}</span>`).join('')}</div>`;
+  const lf = v => Math.log(v / 20) / Math.log(1000), lq = v => Math.log(v / 0.1) / Math.log(180);
+  const c = 'var(--yellow)';
+  const band = !b ? '' : `<div class="sect"><div class="st">Band ${b.n}<span class="mini" style="font-weight:500">select it on the spectrum or with the numbers</span><span class="r"><span class="btn tog ${b.on ? 'on' : ''}" data-bp="pow">On</span><span class="dd" data-bp="type">${b.type}<span class="car">▾</span></span><span class="dd" data-bp="place">${b.place}<span class="car">▾</span></span>${isCut(b) ? '' : `<span class="btn tog ${b.dyn ? 'on' : ''}" data-bp="dyn">Dynamic</span><span class="dd">Compress<span class="car">▾</span></span>`}</span></div>
+    <div class="krow">${K(lf(b.f), 'Freq', fmtHz(b.f), { id: 'eq.freq', col: c })}${isCut(b) ? K(SLOPES.indexOf(b.slope) / 5, 'Slope', b.slope + ' dB/oct', { col: c }) : K((b.g + 18) / 36, 'Gain', (b.g > 0 ? '+' : b.g < 0 ? '−' : '') + Math.abs(b.g).toFixed(1) + ' dB', { id: 'eq.gain', bi: 1, col: c })}${isCut(b) ? '' : K(lq(b.q), 'Q', b.q.toFixed(2), { id: 'eq.q', col: c })}<span style="width:14px"></span>${b.dyn ? `${K(.6, 'Thresh', '−24 dB', { id: 'eq.thr', col: c })}${K(.33, 'Range', '6.0 dB', { col: c })}${K(.3, 'Attack', '10 ms', { col: c })}${K(.4, 'Release', '100 ms', { col: c })}` : ''}${bandFields(b)}</div></div>`;
+  const res = `<div class="sect"><div class="st"><span class="led on"></span>Resonance suppressor<span class="mini" style="font-weight:500">cuts narrow ringing peaks</span><span class="r"><span class="btn">Delta</span><span class="mini">Res <b style="color:var(--orange)">−3.8 dB</b></span></span></div>
+    <div class="krow">${K(.1, 'Low', '150 Hz')}${K(1, 'High', '12.0 kHz')}${K(.3, 'Depth', '6.0 dB')}${K(.5, 'Sharpness', '50%')}${K(.5, 'Speed', '50%')}${K(1, 'Mix', '100%')}</div></div>`;
+  return `<div class="panel ed">${edHead('Dynamic EQ', '10 bands, dynamic per band', `<span class="seg"><span class="on">Min phase</span><span>Linear phase</span></span>`)}<div class="edb"><div style="display:flex;align-items:center;gap:10px">${chips}<span class="mini">Click a number to select · edit points on the spectrum</span></div>${band}${res}</div></div>`;
+}
+const GEN = {
+  in: ['Input', 'trim, polarity and the subsonic filter', [['Trim', '0.0 dB', .5, 1], ['Subsonic', '25 Hz', .22], ['Slope', '24 dB/oct', .5]], '<span class="btn">Ø L</span><span class="btn">Ø R</span><span class="btn tog on">HPF + DC block</span>'],
+  le: ['Low-End', 'mono maker, phase rotator, translator', [['Mono', '120 Hz', .31], ['Slope', '24 dB/oct', .5], ['Amount', '100%', 1], ['Rot freq', '80 Hz', .3], ['Rotate', '90°', .25], ['Translator', '20%', .2], ['2nd/3rd', '50%', .5]], '<span class="btn tog on">Mono</span><span class="btn tog on">Rotator</span><span class="btn tog on">Translator</span>'],
+  bc: ['Bus Comp', 'glue compressor for the whole mix', [['Thresh', '−12 dB', .55], ['Ratio', '2:1', .2], ['Attack', '10 ms', .4], ['Release', 'Auto', .5], ['SC HPF', '100 Hz', .4], ['Mix', '100%', 1], ['Peak/RMS', '50%', .5], ['Link', '100%', 1]], '<span class="seg"><span class="on">VCA</span><span>Punch</span></span><span class="btn tog on">Soft knee</span><span class="btn tog on">Auto release</span><span class="btn">Auto makeup</span>'],
+  sat: ['Saturation', 'three bands, oversampled', [['Low drive', '4.0 dB', .3], ['Low mix', '100%', 1], ['Mid drive', '1.0 dB', .1], ['Mid mix', '100%', 1], ['High drive', '0.0 dB', 0], ['High mix', '100%', 1], ['Low/Mid', '150 Hz', .3], ['Mid/High', '3.0 kHz', .5]], '<span class="dd">Tape<span class="car">▾</span></span><span class="dd">Tube<span class="car">▾</span></span><span class="dd">Tube<span class="car">▾</span></span>'],
+  st: ['Stereo', 'width per band and the correlation guard', [['Mid width', '100%', .5], ['High width', '100%', .5], ['Split', '4.0 kHz', .5], ['M/S bal.', '0.0 dB', .5], ['Guard thr', '0.00', .5]], '<span class="btn">Correlation guard</span>'],
+  cl: ['Clipper', 'shaves drum peaks before the limiter', [['Thresh', '−1.5 dB', .75], ['Shape', '50%', .5], ['Mix', '100%', 1]], '<span class="dd">Soft<span class="car">▾</span></span><span class="btn tog on">Low protect</span><span class="mini">Peak <b style="color:var(--orange)">−2.1 dB</b></span>'],
+  li: ['Limiter', 'true-peak-safe look-ahead limiter', [['Drive', '+6.0 dB', .25], ['Ceiling', '−1.0 dBTP', .67], ['Release', 'Auto', .5], ['Lookahead', '2.0 ms', .33], ['Link', '100%', 1], ['Transients', '0%', 0]], '<span class="dd">Balanced<span class="car">▾</span></span><span class="btn tog on">Auto release</span><span class="mini">GR <b style="color:var(--orange)">−3.2 dB</b></span>'],
+  out: ['Output', 'final gain and dither', [['Gain', '0.0 dB', .5]], '<span class="dd">Dither: Off<span class="car">▾</span></span><span class="dd">24 bit<span class="car">▾</span></span><span class="dd">Quality: Auto<span class="car">▾</span></span>'],
+};
+const GENID = {
+  in: { Trim: 'in.trim', Subsonic: 'in.sub', Slope: 'in.slope' },
+  le: { Mono: 'le.mono', Amount: 'le.amount', Rotate: 'le.rotate', Translator: 'le.trans' },
+  bc: { Thresh: 'bc.thr', Ratio: 'bc.ratio', Attack: 'bc.attack', Release: 'bc.release', 'SC HPF': 'bc.schpf', Mix: 'bc.mix' },
+  st: { 'Mid width': 'st.mid', 'High width': 'st.high', 'Guard thr': 'st.guard' },
+  cl: { Thresh: 'cl.thr', Mix: 'cl.mix' },
+  li: { Drive: 'li.drive', Ceiling: 'li.ceil', Release: 'li.rel', Lookahead: 'li.la' },
+  out: { Gain: 'out.gain' },
+};
+function genericEditor() {
+  const [name, sub, knobs, right] = GEN[MOD];
+  const col = ['cl', 'li'].includes(MOD) ? 'var(--magenta)' : MOD === 'le' ? 'var(--blue)' : 'var(--orange)';
+  let viz = '';
+  if (['bc', 'cl', 'li'].includes(MOD)) {
+    const w = 820, h = 120, r = rng(MOD.length * 7);
+    let d = '';
+    for (let i = 0; i <= 200; i++) {
+      const t = i / 200, beat = Math.pow(Math.max(0, Math.sin(t * Math.PI * 16)), 8);
+      const gr = (MOD === 'li' ? 1.2 + 3.4 * beat : MOD === 'cl' ? 2.6 * beat : 0.8 + 1.2 * beat) * (0.8 + 0.4 * r());
+      d += (i ? 'L' : 'M') + (t * w).toFixed(1) + ' ' + (gr / 6 * h).toFixed(1);
+    }
+    viz = `<div class="sect" style="flex:1;min-height:0"><div class="st">Gain reduction, last 10 s<span class="r mini">${MOD === 'li' ? '&gt; 3 dB: 18% of the time · &gt; 6 dB: 0%' : MOD === 'cl' ? 'peaks shaved: 0–2.6 dB' : 'typical: 1–2 dB'}</span></div><svg width="100%" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="display:block;background:#0d0f13;border-radius:5px">${[1.5, 3, 4.5].map(v => `<line x1="0" x2="${w}" y1="${v / 6 * h}" y2="${v / 6 * h}" stroke="#1f242c"/>`).join('')}<path d="${d}L${w} 0L0 0Z" fill="rgba(255,159,67,.25)"/><path d="${d}" stroke="#ff9f43" fill="none" stroke-width="1.5"/>${[0, 3, 6].map(v => `<text x="${w - 4}" y="${Math.max(11, v / 6 * h - 2)}" fill="#6f7786" font-size="11" text-anchor="end">−${v} dB</text>`).join('')}</svg></div>`;
+  }
+  return `<div class="panel ed">${edHead(name, sub, right)}<div class="edb"><div class="krow">${knobs.map(([l, v, x, bi]) => knob(x, l, v, { bi, col, id: (GENID[MOD] || {})[l] })).join('')}</div>${viz}<div class="mini" style="margin-top:auto">All parameters of the module are here. Hover any control for advice.</div></div></div>`;
+}
+function moduleEditor() { return MOD === 'mb' ? mbEditor() : MOD === 'eq' ? eqEditor() : MOD === 'sat' ? satEditor() : genericEditor(); }
+
+function tonalCompact() {
+  const R = 6, pos = v => 50 + v / R * 50;
+  const rows = TB.map(([n, r, v, c], i) => {
+    const st = status(v), a = Math.min(pos(0), pos(v)), b = Math.max(pos(0), pos(v));
+    return `<div class="tbrow"${tbAttr(i, v)}><div class="n"><b>${n}</b><span>${r}</span></div><div class="track"><div class="cor" style="left:${pos(-c)}%;width:${pos(c) - pos(-c)}%"></div><div class="zero"></div><div class="val" style="left:${a}%;width:${b - a}%;background:${COL[st]};opacity:.55"></div><div class="mk" style="left:${pos(v)}%;background:${COL[st]}"></div></div><div class="num" style="color:${COL[st]}">${m(v)} dB</div>${light(st)}</div>`;
+  }).join('');
+  return `<div class="panel" style="flex:none"><div class="ph"><h3>Tonal balance</h3><div class="right"><span class="seg"><span class="on">Integrated</span><span>10 s</span></span><span class="dd">Ref set (4)<span class="car">▾</span></span></div></div><div class="tbc">${rows}</div></div>`;
+}
+function loudnessCompact() {
+  return `<div class="panel" style="flex:none"><div class="ph"><h3>Loudness</h3><div class="right"><span class="mini">open Eyes for history</span></div></div><div class="ldc">
+    <div class="kvc main"><div class="k">Integrated</div><div class="v">−8.9 <small>LUFS</small></div></div>
+    <div class="kvc"><div class="k">Short-term</div><div class="v">−8.4</div></div><div class="kvc"><div class="k">True peak</div><div class="v" style="color:var(--ok)">−1.1</div></div>
+    <div class="kvc"><div class="k">PLR</div><div class="v" style="color:var(--warn)">7.8</div></div><div class="kvc"><div class="k">LRA</div><div class="v">4.2</div></div></div></div>`;
+}
+function checksCompact() {
+  const rest = CHECKS.slice(6);
+  return `<div class="panel ckc" style="flex:1;min-height:0"><div class="ph"><h3>Checks</h3><span class="sub">hover for advice</span></div><div class="checks">${rest.map(([s, t, v, d]) => `<div class="ck">${light(s)}<span class="t">${t}</span><span class="v" style="color:${COL[s]}">${v}</span><span class="d">${d}</span></div>`).join('')}</div></div>`;
+}
+function spectrumSmall(w, h) {
+  const head = `<div class="ph"><h3>Spectrum</h3>
+    <div class="legend"><span><i class="sw" style="background:#5f86b8"></i>In</span><span><i class="sw" style="background:var(--orange)"></i>Out</span><span><i class="sw" style="background:rgba(78,161,255,.45);height:8px"></i>Refs</span><span><i class="sw" style="background:var(--yellow)"></i>EQ</span></div>
+    <div class="right"><span class="seg"><span class="on">Real-time</span><span>Avg</span><span>Peak</span></span><span class="dd">1/3 oct<span class="car">▾</span></span><span class="dd">Tilt 4.5<span class="car">▾</span></span><span class="seg"><span class="on">Curve</span><span>Delta</span></span><span class="btn">Match EQ</span><span class="btn ic">⋯</span></div></div>`;
+  const svg = spectrumSVG(w - 10, h - 32 - 10, { eq: true });
+  return `<div class="panel" style="height:${h}px;flex:none">${head}<div style="padding:6px 4px 2px 4px;position:relative">${svg}${bandPanel()}${eqMenu()}</div></div>`;
+}
+const SPEC_H = 280;
+function workspace() {
+  const lw = 1260 - 380 - 8;
+  return `<div class="content"><div class="ws"><div class="wsl">${spectrumSmall(lw, SPEC_H)}${moduleBar()}${moduleEditor()}</div><div class="wsr">${tonalCompact()}${loudnessCompact()}${checksCompact()}</div></div></div>`;
+}
+function compactMaster() {
+  const first = Math.max(0, Math.min(MODS.findIndex(m => m[0] === MOD) - 2, 4));
+  const tiles = `<div class="mbar" style="grid-template-columns:repeat(10,96px);overflow:hidden">${MODS.slice(first).map(([k, n, on, st]) => `<div class="tile ${on ? '' : 'off'} ${k === MOD ? 'sel' : ''}" style="height:44px" data-mod="${k}"><div class="tn"><span class="led ${on ? 'on' : ''}"></span>${n}</div><div class="ts">${st}</div></div>`).join('')}</div>`;
+  const bands = ['Low', 'Low-mid', 'Mid', 'High-mid', 'High'];
+  const ed = `<div class="panel ed"><div class="ph"><span class="led on"></span><h3>Multiband</h3><div class="right"><span class="seg">${bands.map((b, i) => `<span class="${i === 0 ? 'on' : ''}">${b}</span>`).join('')}</span></div></div><div class="edb"><div class="grh">GR<div class="t"><i style="width:24%"></i></div><b>−2.4 dB</b><span class="sb on">S</span><span class="sb byp">B</span></div><div class="krow">${['Thresh', 'Ratio', 'Makeup', 'Attack', 'Release', 'Knee', 'Mix', 'Link', 'Trim'].map((l, j) => K([.55, .3, .5, .3, .4, .5, 1, 1, .5][j], l, ['−26 dB', '3.0:1', '+1.0 dB', '15 ms', '120 ms', '6 dB', '100%', '100%', '0.0 dB'][j], { bi: l === 'Makeup' || l === 'Trim', id: 'mb.' + l.toLowerCase(), meter: l === 'Thresh' ? { lv: .66 } : null })).join('')}</div></div></div>`;
+  return `<div class="content">${tiles}${MOD === 'sat' ? compactSat() : ed}</div>`;
+}
+
+
+/* ---------- v6: graphical saturation ---------- */
+const SATC = ['#4fc6e0', '#ff9f43', '#b78cff'];
+const SATN = [['Low', 'below'], ['Mid', ''], ['High', 'above']];
+const SATT = ['Tube', 'Tape', 'Transformer', 'Diode'];
+let SATX = [150, 3000], SATB = 0;
+const SAT = [{ type: 'Tape', drive: 4.0, asym: 20, mix: 100, out: -0.5, lvl: .78 },
+             { type: 'Tube', drive: 1.0, asym: 10, mix: 60, out: 0.0, lvl: .62 },
+             { type: 'Tube', drive: 0.5, asym: 0, mix: 50, out: 0.0, lvl: .42 }];
+const fmtF = f => f >= 1000 ? (f / 1000).toFixed(f >= 10000 ? 0 : 1) + ' kHz' : Math.round(f) + ' Hz';
+const satRange = i => i === 0 ? `&lt; ${fmtF(SATX[0])}` : i === 1 ? `${fmtF(SATX[0])} – ${fmtF(SATX[1])}` : `&gt; ${fmtF(SATX[1])}`;
+function shapeFn(t) {
+  return t === 'Tape' ? x => Math.atan(x * 1.3) / Math.atan(1.3) * 0.9 : t === 'Transformer' ? x => 0.75 * Math.tanh(x) + 0.25 * x / (1 + 0.3 * Math.abs(x))
+       : t === 'Diode' ? x => x / Math.pow(1 + Math.pow(Math.abs(x), 5), 0.2) : x => Math.tanh(x);
+}
+function transfer(b) {
+  const g = shapeFn(b.type), D = 1.2 * Math.pow(10, b.drive / 20) * (b.type === 'Diode' ? 1.3 : 1), bias = b.asym / 100 * 0.7;
+  const raw = x => g(D * x + bias) - g(bias);
+  const n = Math.max(Math.abs(raw(1)), Math.abs(raw(-1)));
+  return x => b.mix / 100 * raw(x) / n + (1 - b.mix / 100) * x;
+}
+function curveSVG(b, col, sz) {
+  const f = transfer(b), P = (x, y) => `${(sz / 2 + x * (sz / 2 - 6)).toFixed(1)} ${(sz / 2 - y * (sz / 2 - 6)).toFixed(1)}`;
+  const pts = lo => { let d = ''; for (let k = 0; k <= 60; k++) { const x = -1 + 2 * k / 60; if (Math.abs(x) <= lo + 1e-9) d += (d ? 'L' : 'M') + P(x, f(x)); } return d; };
+  const lv = b.lvl, sh = `<rect x="${(sz / 2 - lv * (sz / 2 - 6)).toFixed(1)}" y="1" width="${(2 * lv * (sz / 2 - 6)).toFixed(1)}" height="${sz - 2}" fill="${col}" opacity=".07"/>`;
+  return `<svg class="curve" width="${sz}" height="${sz}" data-t="sat.curve">${sh}<line x1="${sz / 2}" y1="4" x2="${sz / 2}" y2="${sz - 4}" stroke="#232831"/><line x1="4" y1="${sz / 2}" x2="${sz - 4}" y2="${sz / 2}" stroke="#232831"/><path d="M${P(-1, -1)}L${P(1, 1)}" stroke="#3a414d" stroke-dasharray="3 3"/><path d="${pts(1)}" stroke="${col}" stroke-width="1.5" fill="none" opacity=".45"/><path d="${pts(lv)}" stroke="${col}" stroke-width="2.6" fill="none"/></svg>`;
+}
+function satGraph(W, H) {
+  const X = f => fx(f, W), dbY = db => 8 + (-db - 8) / 34 * (H - 30), edges = [20, SATX[0], SATX[1], 20000];
+  const dY = d => H - 18 - d / 24 * (H - 40);
+  let g = '';
+  for (const f of [50, 100, 200, 500, 1000, 2000, 5000, 10000]) g += `<line x1="${X(f).toFixed(1)}" y1="0" x2="${X(f).toFixed(1)}" y2="${H - 14}" stroke="#1b1f26"/><text x="${(X(f) + 3).toFixed(1)}" y="${H - 4}" fill="#5d6573" font-size="10">${f >= 1000 ? f / 1000 + 'k' : f}</text>`;
+  for (let i = 0; i < 3; i++) {
+    const x0 = X(edges[i]), x1 = X(edges[i + 1]), col = SATC[i], b = SAT[i];
+    let d = '', f0 = edges[i];
+    for (let k = 0; k <= 40; k++) { const f = f0 * Math.pow(edges[i + 1] / f0, k / 40); d += (k ? 'L' : 'M') + X(f).toFixed(1) + ' ' + dbY(outC(f) + 14).toFixed(1); }
+    const y = dY(b.drive);
+    g += `<g data-t="sat.graph"><rect x="${x0.toFixed(1)}" y="0" width="${(x1 - x0).toFixed(1)}" height="${H - 14}" fill="${col}" opacity=".05"/>`
+      + `<path d="${d}L${x1.toFixed(1)} ${H - 14}L${x0.toFixed(1)} ${H - 14}Z" fill="${col}" opacity=".16"/><path d="${d}" stroke="${col}" stroke-width="1.4" fill="none" opacity=".85"/>`
+      + `<rect x="${(x0 + 4).toFixed(1)}" y="${y.toFixed(1)}" width="${(x1 - x0 - 8).toFixed(1)}" height="${(H - 14 - y).toFixed(1)}" fill="${col}" opacity=".10"/>`
+      + `<line x1="${(x0 + 4).toFixed(1)}" y1="${y.toFixed(1)}" x2="${(x1 - 4).toFixed(1)}" y2="${y.toFixed(1)}" stroke="${col}" stroke-width="2"/></g>`;
+    const cx = (x0 + x1) / 2, lab = `${SATN[i][0]} · ${b.type} · ${b.drive.toFixed(1)} dB`, lw = lab.length * 6.1 + 14;
+    g += `<g class="sdrag" data-band="${i}" style="cursor:ns-resize" data-t="sat.graph"><circle cx="${cx.toFixed(1)}" cy="${y.toFixed(1)}" r="6" fill="${col}" stroke="#0d0f13" stroke-width="2"/>`
+      + `<rect x="${(cx - lw / 2).toFixed(1)}" y="${(y - 25).toFixed(1)}" width="${lw.toFixed(1)}" height="17" rx="4" fill="#0d0f13" stroke="${col}"/><text x="${cx.toFixed(1)}" y="${(y - 13).toFixed(1)}" fill="${col}" font-size="11" font-weight="600" text-anchor="middle">${lab}</text></g>`;
+  }
+  SATX.forEach((f, j) => {
+    const x = X(f), t = fmtF(f), w = t.length * 6.3 + 12;
+    g += `<g class="xdrag" data-x="${j}" style="cursor:ew-resize" data-t="sat.graph"><line x1="${x.toFixed(1)}" y1="0" x2="${x.toFixed(1)}" y2="${H - 14}" stroke="var(--yellow)" stroke-width="2"/><rect x="${(x - w / 2).toFixed(1)}" y="${H - 32}" width="${w.toFixed(1)}" height="16" rx="4" fill="var(--yellow)"/><text x="${x.toFixed(1)}" y="${H - 20}" fill="#1b1600" font-size="10.5" font-weight="700" text-anchor="middle">${t}</text></g>`;
+  });
+  return `<div class="satg"><svg viewBox="0 0 ${W} ${H}" data-w="${W}" data-h="${H}">${g}</svg></div>`;
+}
+const typeList = i => `<div class="tlist" data-t="sat.type">${SATT.map(t => `<div class="ti ${SAT[i].type === t ? 'on' : ''}" data-band="${i}" data-type="${t}"><i></i>${t}</div>`).join('')}</div>`;
+const sdb = v => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(1) + ' dB';
+const satKnobs = (b, i, sz) => ({
+  drive: knob(b.drive / 24, 'Drive', b.drive.toFixed(1) + ' dB', { id: 'sat.drive', col: SATC[i], size: sz }),
+  asym: knob(b.asym / 100, 'Asymmetry', b.asym + '%', { id: 'sat.asym', col: SATC[i], size: 30 }),
+  mix: knob(b.mix / 100, 'Mix', b.mix + '%', { id: 'sat.mix', col: SATC[i], size: 30 }),
+  out: knob((b.out + 12) / 24, 'Output', sdb(b.out), { id: 'sat.out', col: SATC[i], size: 30, bi: 1 }),
+});
+function satEditor() {
+  const cards = SAT.map((b, i) => {
+    const k = satKnobs(b, i, 44);
+    return `<div class="satcard" style="--bc:${SATC[i]}"><div class="sh"><b>${SATN[i][0]}</b><span class="mini">${satRange(i)}</span><span class="r mini">Drive <b style="color:${SATC[i]}">${b.drive.toFixed(1)} dB</b></span></div>
+      <div class="sbody">${curveSVG(b, SATC[i], 84)}${typeList(i)}${k.drive}</div><div class="krow3">${k.asym}${k.mix}${k.out}</div></div>`;
+  }).join('');
+  return `<div class="panel ed">${edHead('Saturation', 'three bands, oversampled · drag a band up or down to set its drive', `<span class="mini">Oversampling follows Quality</span>`)}<div class="edb">${satGraph(838, 84)}<div class="satbands">${cards}</div></div></div>`;
+}
+function compactSat() {
+  const i = SATB, b = SAT[i], k = satKnobs(b, i, 44);
+  return `<div class="panel ed"><div class="ph"><span class="led on"></span><h3>Saturation</h3><div class="right"><span class="seg">${SATN.map(([n], j) => `<span class="${j === i ? 'on' : ''}" data-satb="${j}" style="${j === i ? `color:${SATC[j]}` : ''}">${n}</span>`).join('')}</span></div></div>
+    <div class="edb" style="gap:6px">${satGraph(600, 70)}<div class="satcard" style="--bc:${SATC[i]};flex:1;flex-direction:row;align-items:center;gap:10px">${curveSVG(b, SATC[i], 96)}${typeList(i)}${k.drive}${k.asym}${k.mix}${k.out}</div></div></div>`;
+}
+function knobSheet() {
+  const cell = (v, lv, inv, val, cap) => `<div class="cell">${knob(v, inv ? 'Guard thr' : 'Thresh', val, { size: 96, meter: lv === null ? { lv: 0 } : { lv, inv } })}<div class="cap">${cap}</div></div>`;
+  return `<div class="sheet"><h2>Threshold knob with a signal ring</h2>
+    <div class="lg"><span><i style="background:var(--orange)"></i>inner arc: threshold value</span><span><i style="background:var(--ok)"></i>outer ring: signal below the threshold</span><span><i style="background:var(--bad)"></i>outer ring: signal above the threshold (the module acts)</span><span><i style="background:#fff;width:4px;height:12px"></i>white mark: threshold</span></div>
+    <div class="krs">${cell(.55, null, 0, '−27 dB', '<b>Нет сигнала.</b><br>Кольцо пустое.')}${cell(.55, .45, 0, '−27 dB', '<b>Сигнал ниже порога.</b><br>Кольцо зелёное. Модуль не изменяет звук.')}${cell(.55, .68, 0, '−27 dB', '<b>Сигнал выше порога.</b><br>Красная часть — на сколько сигнал выше порога. Модуль работает.')}${cell(.5, .32, 1, '0.00', '<b>Correlation guard.</b><br>Кольцо показывает корреляцию. Красный цвет — корреляция ниже порога.')}</div></div>`;
+}
+
+
+/* ---------- v7: tonal balance advice ----------
+   Same writing rules as the other tooltips (ASD-STE100): short sentences, one instruction per sentence.
+   up = band above the target, dn = band below the target. [what you hear, steps]. */
+const TBA = [
+  { up: ['Низ гудит в машине и в клубе. Лимитер работает больше.',
+         ['Multiband, полоса Low: уменьшите Thresh, пока кольцо не станет красным на ударах бочки.', 'Dynamic EQ: Low shelf 60 Hz, −1…−2 dB.', 'Input: поднимите Subsonic до 30–35 Hz.']],
+    dn: ['Низ звучит слабо на больших системах.',
+         ['Dynamic EQ: Low shelf 50 Hz, +1…+2 dB.', 'Input: опустите Subsonic до 20–25 Hz.', 'Multiband, полоса Low: увеличьте Thresh.']] },
+  { up: ['Бас и бочка закрывают гитары. Звук мутный.',
+         ['Dynamic EQ: Bell 100 Hz, Q 1.0, −1…−2 dB. Включите Dynamic: полоса работает только на громких нотах.', 'Multiband, полоса Low-mid: уменьшите Thresh, Ratio 2:1.']],
+    dn: ['Микс звучит тонко. Удар бочки слабый.',
+         ['Dynamic EQ: Bell 100 Hz, Q 1.0, +1…+2 dB.', 'Saturation, полоса Low: Drive 2–4 dB. Гармоники делают бас слышнее.']] },
+  { up: ['Звук мутный и «картонный».',
+         ['Dynamic EQ: Bell 250–300 Hz, Q 1.5, −1…−2 dB.', 'Multiband, полоса Low-mid: уменьшите Thresh.']],
+    dn: ['Гитары звучат тонко. Нет «тела».',
+         ['Dynamic EQ уменьшает этот диапазон: полоса 3, 280 Hz, −2.0 dB. Сделайте срез меньше.', 'Saturation, полоса Mid: Drive 1–3 dB, тип Tape.']] },
+  { up: ['Звук «в нос», плоский и громкий.',
+         ['Dynamic EQ: Bell 800 Hz – 1 kHz, Q 1.0, −1 dB.', 'Multiband, полоса Mid: уменьшите Thresh, Ratio 1.5:1.']],
+    dn: ['Вокал и соло-гитара уходят назад.',
+         ['Dynamic EQ: Bell 1 kHz, Q 0.8, +1 dB.', 'Saturation, полоса Mid: Drive 1–2 dB.']] },
+  { up: ['Гитары режут уши. Звук утомляет.',
+         ['Dynamic EQ: Bell 3–4 kHz, Q 2.0, −1…−2 dB. Включите Dynamic.', 'Resonance suppressor: Low 2 kHz, High 6 kHz, Depth 3–6 dB.', 'Saturation, полоса High: уменьшите Drive.']],
+    dn: ['Гитары и вокал не читаются. Звук глухой.',
+         ['Dynamic EQ: Bell 3 kHz, Q 1.0, +1 dB.', 'Resonance suppressor: уменьшите Depth.']] },
+  { up: ['Тарелки шипят. Звук резкий.',
+         ['Dynamic EQ: High shelf 10 kHz, −1 dB.', 'Resonance suppressor: High 16 kHz, Depth 3 dB.', 'Saturation, полоса High: уменьшите Drive или Mix.']],
+    dn: ['Звук тёмный. Тарелки плохо слышно.',
+         ['Dynamic EQ: High shelf 10 kHz, +1…+1.5 dB.', 'Resonance suppressor: уменьшите Depth или High.']] },
+];
+const tbAttr = (i, v) => status(v) === 'ok' ? '' : ` data-t="tb.band" data-b="${i}" data-v="${v}"`;
+function tbTip(i, v) {
+  const [n, r, , c] = TB[i], st = status(v), a = TBA[i][v > 0 ? 'up' : 'dn'], d = Math.abs(v).toFixed(1);
+  const steps = a[1].map((t, k) => `${k + 1}. ${t}`).join('<br>');
+  return `<div class="h"><b>${n} · ${r}</b><span style="color:${st === 'bad' ? '#b3261e' : '#8a6100'}">${m(v)} dB</span></div>`
+    + sec('Статус', `${v > 0 ? 'Выше' : 'Ниже'} цели на ${d} dB. Норма: ±${c.toFixed(1)} dB.`, st === 'bad')
+    + sec('Слышно', a[0]) + sec('Исправьте', steps)
+    + `<div class="f"><span>Меняйте на 1 dB за шаг. Нужно больше 3 dB — исправьте микс.</span></div>`;
+}
+function tbSheet() {
+  const card = (i, v) => `<div class="ktip tbx">${tbTip(i, v)}</div>`;
+  return `<div class="sheet"><h2>Tonal balance advice (all twelve texts)</h2><div class="tbg"><div class="mini">Above the target</div><div class="mini">Below the target</div>${TB.map((t, i) => card(i, 2.9) + card(i, -1.6)).join('')}</div></div>`;
+}
+
+
+/* ---------- v8: band panel and menu on the spectrum ---------- */
+function bandPanel() {
+  if (!SPG || !SELB || MENU || MOD !== 'eq') return '';
+  const b = EQB[SELB - 1]; if (!b.used) return '';
+  const { left, gw, gh, ey } = SPG, x = left + fx(b.f, gw), y = ey(isCut(b) || b.type === 'Notch' ? 0 : b.g);
+  const W = 452, H = EDIT && EDITLOC === 'sp' ? 88 : 66, ox = 4, oy = 6;
+  const L = Math.max(ox + left, Math.min(ox + left + gw - W, ox + x - W / 2));
+  const below = y + 18 + H < gh, T = below ? oy + y + 18 : oy + y - 18 - H;
+  const fld = (k, v) => eqFld(k, v, 'sp');
+  const gainOrSlope = isCut(b) ? `<span class="fl">Slope</span><span class="dd" data-bp="slope">${b.slope} dB/oct<span class="car">▾</span></span>`
+    : b.type === 'Notch' ? '' : `<span class="fl">Gain</span>${fld('gain', (b.g > 0 ? '+' : b.g < 0 ? '−' : '') + Math.abs(b.g).toFixed(1) + ' dB')}`;
+  return `<div class="bp" style="left:${L}px;top:${T}px;width:${W}px">
+    <div class="bpr"><span class="pw ${b.on ? 'on' : ''}" data-bp="pow" data-t="eq.pow"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 1.2v4.6"/><path d="M3.3 3.1a4 4 0 1 0 5.4 0"/></svg></span><b>Band ${b.n}</b>
+      <span class="dd" data-bp="type">${b.type}<span class="car">▾</span></span><span class="dd" data-bp="place">${b.place}<span class="car">▾</span></span>
+      ${isCut(b) ? '' : `<span class="btn tog ${b.dyn ? 'on' : ''}" data-bp="dyn">Dynamic</span>`}<span class="btn tog ${SNAP ? 'on' : ''}" data-bp="snap" data-t="eq.snap">♪ Snap</span>
+      <span class="btn ic" data-bp="del" data-t="eq.del" style="margin-left:auto">✕</span></div>
+    <div class="bpr"><span class="fl">Freq</span>${fld('freq', fmtHz(b.f))}<span class="nt">${noteF(b.f)}</span>${gainOrSlope}${isCut(b) ? '' : `<span class="fl">Q</span>${fld('q', b.q.toFixed(2))}`}</div>
+    ${EDIT && EDITLOC === 'sp' ? EDHINT : ''}</div>`;
+}
+function eqMenu() {
+  if (!SPG || !MENU) return '';
+  const b = EQB[MENU - 1]; if (!b.used) return '';
+  const { left, gw, ey } = SPG, x = left + fx(b.f, gw), y = ey(isCut(b) || b.type === 'Notch' ? 0 : b.g);
+  const L = Math.min(4 + left + gw - 420, 4 + x + 16), T = 6 + y - 12;
+  const mk = on => `<span class="mk2">${on ? '✓' : ''}</span>`;
+  const sub = (items, cur, act) => `<div class="smenu cm">${items.map(t => `<div class="it" data-cm="${act}" data-v="${t}">${mk(t === cur)}${t}</div>`).join('')}</div>`;
+  const nf = snapF(b.f);
+  return `<div class="cm" style="left:${L}px;top:${T}px">
+    <div class="it hl"><span class="mk2"></span>Type<span class="k">${b.type} ▸</span>${sub(EQTYPES(b.n), b.type, 'type')}</div>
+    <div class="it"><span class="mk2"></span>Placement<span class="k">${b.place} ▸</span>${sub(PLACES, b.place, 'place')}</div>
+    ${isCut(b) ? `<div class="it"><span class="mk2"></span>Slope<span class="k">${b.slope} dB/oct ▸</span>${sub(SLOPES.map(v => v + ' dB/oct'), b.slope + ' dB/oct', 'slope')}</div>` : `<div class="it" data-cm="dyn">${mk(b.dyn)}Dynamic</div>`}
+    <hr><div class="it" data-cm="snap">${mk(SNAP)}Snap to notes</div>
+    <div class="it" data-cm="tonote"><span class="mk2"></span>Move to nearest note<span class="k">${note(nf).name} · ${fmtHz(nf)}</span></div>
+    <hr><div class="it" data-cm="pow">${mk(!b.on)}Bypass band<span class="k">Double-click</span></div>
+    <div class="it" data-cm="del"><span class="mk2"></span>Delete band<span class="k">Alt+click</span></div></div>`;
+}
+function addBandAt(f, g) {
+  const edgeLo = f < 30, edgeHi = f > 14000;
+  let b = null, msg = '';
+  if (edgeLo && !EQB[0].used) { b = EQB[0]; Object.assign(b, { type: 'Low cut', g: 0, slope: 24 }); }
+  else if (edgeHi && !EQB[9].used) { b = EQB[9]; Object.assign(b, { type: 'High cut', g: 0, slope: 24 }); }
+  else {
+    b = EQB.slice(1, 9).find(x => !x.used);
+    if (!b) { toast('All 10 bands are in use. Delete a band first.'); return; }
+    if (edgeLo) msg = 'Band 1 (the only low cut band) is in use: a low shelf was added.';
+    if (edgeHi) msg = 'Band 10 (the only high cut band) is in use: a high shelf was added.';
+    Object.assign(b, { type: edgeLo ? 'Low shelf' : edgeHi ? 'High shelf' : 'Bell', g: edgeLo || edgeHi ? 0 : Math.max(-18, Math.min(18, Math.round(g * 2) / 2)), q: 1 });
+  }
+  Object.assign(b, { used: 1, on: 1, f: Math.max(20, Math.min(20000, f)), dyn: 0, place: 'Stereo' });
+  SELB = b.n; MENU = 0; EDIT = ''; MOD = 'eq';
+  if (msg) toast(msg);
+}
+function deleteBand(n) { const b = EQB[n - 1]; b.used = 0; b.on = 1; b.g = 0; b.dyn = 0; if (SELB === n) SELB = (EQB.find(x => x.used) || {}).n || 0; MENU = 0; EDIT = ''; }
+function cycle(list, v) { return list[(list.indexOf(v) + 1) % list.length]; }
+function bandAction(act, v) {
+  const b = EQB[(MENU || SELB) - 1]; if (!b) return;
+  if (act === 'pow') b.on = b.on ? 0 : 1;
+  else if (act === 'type') { b.type = v || cycle(EQTYPES(b.n), b.type); if (isCut(b)) b.dyn = 0; }
+  else if (act === 'place') b.place = v || cycle(PLACES, b.place);
+  else if (act === 'slope') b.slope = v ? parseInt(v) : cycle(SLOPES, b.slope);
+  else if (act === 'dyn') b.dyn = b.dyn ? 0 : 1;
+  else if (act === 'snap') { SNAP = !SNAP; if (SNAP) b.f = snapF(b.f); }
+  else if (act === 'tonote') b.f = snapF(b.f);
+  else if (act === 'del') { deleteBand(b.n); return; }
+  else if (['freq', 'gain', 'q'].includes(act)) { EDIT = act; EDITV = ''; }
+  MENU = 0;
+}
+function commitEdit(text) {
+  const b = EQB[SELB - 1];
+  if (EDIT === 'freq') { const f = parseFreq(text); if (!isFinite(f) || f < 20 || f > 20000) { toast('Type 20 Hz – 20 kHz, or a note such as E1.'); return; } b.f = f; }
+  if (EDIT === 'gain') { const g = parseFloat(text.replace('−', '-').replace(',', '.')); if (isFinite(g)) b.g = Math.max(-18, Math.min(18, g)); }
+  if (EDIT === 'q') { const q = parseFloat(text.replace(',', '.')); if (isFinite(q)) b.q = Math.max(0.1, Math.min(18, q)); }
+  EDIT = ''; EDITV = '';
+}
+function bindSpectrum() {
+  const svg = win.querySelector('svg[data-spec]'); if (!svg || !SPG) return;
+  const loc = e => { const r = svg.getBoundingClientRect(), sc = r.width / SPG.w; return [(e.clientX - r.left) / sc - SPG.left, (e.clientY - r.top) / sc]; };
+  const fOf = x => 20 * Math.pow(1000, Math.max(0, Math.min(1, x / SPG.gw))), gOf = y => (SPG.gh * 0.42 - y) * 12 / (SPG.gh * 0.32);
+  svg.addEventListener('dblclick', e => {
+    const node = e.target.closest('[data-band]');
+    if (node) EQB[+node.dataset.band - 1].on ^= 1;
+    else { const [x, y] = loc(e); if (x < 0 || x > SPG.gw || y > SPG.gh) return; addBandAt(fOf(x), gOf(y)); }
+    render();
+  });
+  svg.querySelectorAll('[data-band]').forEach(el => {
+    const n = +el.dataset.band, b = EQB[n - 1];
+    el.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      e.preventDefault(); e.stopPropagation();
+      if (e.altKey) { deleteBand(n); render(); return; }
+      SELB = n; MENU = 0; EDIT = ''; MOD = 'eq';
+      const [x0, y0] = loc(e), f0 = b.f, g0 = b.g;
+      const move = ev => {
+        const [x, y] = loc(ev), k = ev.shiftKey ? 0.15 : 1;
+        let f = f0 * Math.pow(1000, (x - x0) * k / SPG.gw);
+        f = Math.max(20, Math.min(20000, SNAP ? snapF(f) : f));
+        b.f = f;
+        if (!isCut(b) && b.type !== 'Notch') b.g = Math.max(-18, Math.min(18, g0 + (gOf(y) - gOf(y0)) * k));
+        render();
+      };
+      const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+      window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+      render();
+    });
+    el.addEventListener('wheel', e => { e.preventDefault(); if (isCut(b)) b.slope = SLOPES[Math.max(0, Math.min(5, SLOPES.indexOf(b.slope) + (e.deltaY < 0 ? 1 : -1)))]; else b.q = Math.max(0.1, Math.min(18, b.q * (e.deltaY < 0 ? 1.12 : 1 / 1.12))); SELB = n; render(); }, { passive: false });
+    el.addEventListener('contextmenu', e => { e.preventDefault(); SELB = n; MENU = n; EDIT = ''; render(); });
+  });
+  win.querySelectorAll('[data-bp]').forEach(el => el.addEventListener('mousedown', e => {
+    if (el.classList.contains('ed')) return;
+    e.preventDefault(); e.stopPropagation(); EDITLOC = el.closest('.bp') ? 'sp' : 'ed'; bandAction(el.dataset.bp); render();
+  }));
+  win.querySelectorAll('.cm [data-cm]').forEach(el => el.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); bandAction(el.dataset.cm, el.dataset.v); render(); }));
+  win.querySelectorAll('[data-chip]').forEach(el => el.addEventListener('click', () => { SELB = +el.dataset.chip; MENU = 0; EDIT = ''; render(); }));
+  const inp = win.querySelector('.fld.ed input');
+  if (inp) {
+    setTimeout(() => { inp.focus(); inp.select(); }, 0);
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') { commitEdit(inp.value); render(); } if (e.key === 'Escape') { EDIT = ''; render(); } });
+  }
+}
+window.addEventListener('mousedown', e => { if ((MENU || EDIT) && !e.target.closest('.cm,.fld.ed')) { MENU = 0; EDIT = ''; render(); } });
+
+/* ---------- views ---------- */
+function master() { return workspace(); }
+function eyes() {
+  return `<div class="content"><div class="grid">${tonalPanel()}${loudnessPanel()}${checksPanel(false)}${lowEndPanel()}${stereoPanel()}</div>${tooltip()}</div>`;
+}
+function compact() {
+  const sw = 392, sh = 400 - 38 - 28 - 20 - 12;
+  const head = `<div class="ph"><h3>Spectrum</h3><div class="right"><span class="seg"><span class="on">RT</span><span>Avg</span></span><span class="dd">1/3<span class="car">▾</span></span></div></div>`;
+  return `<div class="content" style="flex-direction:row"><div class="panel" style="width:${sw}px;flex:none">${head}<div style="padding:6px 4px 2px">${spectrumSVG(sw - 10, sh - 28 - 10, { compact: true })}</div></div>${checksPanel(true)}</div>`;
+}
+
+const win = document.createElement('div');
+const stage = document.getElementById('stage');
+stage.appendChild(win);
+function fit() {
+  const bar = document.getElementById('mbar');
+  const top = bar && !bar.hidden ? bar.offsetHeight : 0;
+  const aw = innerWidth, ah = innerHeight - top;
+  let s = Math.min(aw / DW, ah / DH);
+  if (!SHOT) s = Math.min(s, COMPACT ? 1 : SIZE / 100); // real pixel size when it fits
+  stage.style.transform = `scale(${s})`;
+  stage.style.left = Math.max(0, (aw - DW * s) / 2) + 'px';
+  stage.style.top = top + Math.max(0, (ah - DH * s) / 2) + 'px';
+  const info = document.getElementById('mInfo');
+  if (info) {
+    const w = COMPACT ? 640 : DW * SIZE / 100, h = COMPACT ? 400 : DH * SIZE / 100, shown = Math.round(DW * s / w * 100);
+    info.textContent = `Окно ${w}×${h}` + (shown < 100 ? ` · показано ${shown}%` : '');
+  }
+}
+addEventListener('resize', fit);
+/* ---------- knob tooltips (v2) ----------
+   Text is Russian and follows the ASD-STE100 writing rules: one idea per sentence,
+   short sentences (at most 20 words), active voice, present tense, one term for one meaning,
+   instructions in the imperative, a warning before the risk. Technical terms stay in English. */
+const KMOD = {
+  in: ['Input', 'Input задаёт уровень сигнала на входе. Фильтр Subsonic удаляет самые низкие частоты, которые человек не слышит.'],
+  eq: ['Dynamic EQ', 'Dynamic EQ — эквалайзер на 10 полос. Динамическая полоса работает, только когда уровень в полосе выше порога. Ручки изменяют выбранную полосу (сейчас полоса 5).'],
+  le: ['Low-End', 'Low-End управляет низкими частотами. Модуль делает их моно, уменьшает их пики и делает их слышными на маленьких колонках.'],
+  bc: ['Bus Comp', 'Bus Comp — компрессор для всего микса. Он уменьшает уровень громких мест и «склеивает» инструменты. Обычно он уменьшает уровень на 1–2 dB.'],
+  sat: ['Saturation', 'Saturation добавляет гармоники в трёх полосах. Гармоники — призвуки на частотах ×2 и ×3 от ноты. Они делают звук плотнее.'],
+  cl: ['Clipper', 'Clipper срезает самые короткие пики бочки и малого барабана перед лимитером. Тогда лимитер работает меньше и не сплющивает барабаны.'],
+  li: ['Limiter', 'Limiter поднимает громкость трека. Он не пропускает true peak выше уровня Ceiling. True peak — реальный пик волны между сэмплами.'],
+  out: ['Output', 'Output задаёт итоговый уровень и включает дизеринг. Дизеринг — тихий шум, который убирает искажения при переводе в 16 bit.'],
+  mb: ['Multiband', 'Multiband сжимает пять частотных полос отдельно. Каждая полоса имеет свой компрессор.'],
+  st: ['Stereo', 'Stereo изменяет ширину стерео отдельно для средних и высоких частот. Низкие частоты ниже частоты Mono (модуль Low-End) всегда моно.'],
+};
+const TIPW = 'Внимание', TIPH = 'Совет';
+const KTIPS = {
+  'in.trim': ['Trim', '−24 … +24 dB', 'Ручка изменяет уровень сигнала перед всеми модулями.', TIPH, 'Компрессор и лимитер реагируют на уровень. Когда вы изменяете Trim, их работа тоже изменяется.'],
+  'in.sub': ['Subsonic', '15 … 60 Hz', 'Ручка задаёт частоту фильтра. Фильтр удаляет частоты ниже этого значения.', TIPH, 'Эти частоты не слышно, но они забирают запас лимитера. 8- и 9-струнные гитары и бочка дают много таких частот. Начните с 25 Hz.'],
+  'in.slope': ['Slope', '12 / 24 / 48 dB/oct', 'Ручка задаёт крутизну фильтра Subsonic. dB/oct — на сколько децибел фильтр уменьшает уровень на каждую октаву.', TIPH, 'Большое значение удаляет частоты резче. Значение по умолчанию — 24 dB/oct.'],
+  'eq.freq': ['Freq', '20 Hz … 20 kHz', 'Ручка задаёт центральную частоту выбранной полосы. Вы также можете перетащить точку полосы на спектре.', TIPH, 'Типичные зоны для метала: «грязь» 150–400 Hz, «коробка» 400–600 Hz, «песок» гитар 4–8 kHz. Спектр показывает ноту под курсором.'],
+  'eq.gain': ['Gain', '−18 … +18 dB', 'Ручка поднимает или опускает уровень выбранной полосы.', TIPH, 'Подъём на низких частотах забирает запас лимитера. Для проблемной зоны сначала попробуйте опустить уровень.'],
+  'eq.q': ['Q', '0.1 … 18', 'Ручка задаёт ширину полосы. Большое значение Q даёт узкую полосу. Малое значение Q даёт широкую полосу.', TIPH, 'Узкая полоса подходит для одной гудящей ноты. Широкая полоса изменяет общий тембр.'],
+  'eq.thr': ['Thresh', '−60 … 0 dB', 'Ручка задаёт порог динамической полосы. Полоса изменяет уровень, только когда сигнал в полосе выше порога.', TIPH, 'Так полоса убирает «песок» гитар только в громких местах. Тихие места остаются без изменений.'],
+  'le.mono': ['Mono', '40 … 300 Hz', 'Ручка задаёт частоту. Ниже этой частоты модуль делает сигнал моно: левый и правый каналы становятся одинаковыми.', TIPH, 'Моно на низких частотах даёт плотный и стабильный низ в клубе и в машине. Начните со 120 Hz.'],
+  'le.amount': ['Amount', '0 … 100%', 'Ручка задаёт, сколько сигнала Side модуль удаляет ниже частоты Mono. Side — разница между левым и правым каналами.', TIPH, '100% — низкие частоты полностью моно. Малое значение оставляет немного ширины.'],
+  'le.rotate': ['Rotate', '0 … 360°', 'Ручка поворачивает фазу низких частот. Звук почти не изменяется, но форма волны становится симметричнее.', TIPH, 'Симметричная волна даёт меньшие пики, и лимитер получает больше запаса. Сравните волну «до» и «после» на вкладке Low-End.'],
+  'le.trans': ['Translator', '0 … 100%', 'Ручка добавляет гармоники к нотам 30–90 Hz. Ноутбук и телефон не воспроизводят 40 Hz, но воспроизводят гармоники. Так вы слышите ноту.', TIPH, 'В громких местах модуль добавляет меньше гармоник. Проверьте результат на маленьких колонках.'],
+  'bc.thr': ['Thresh', 'dB', 'Ручка задаёт порог. Компрессор уменьшает уровень, только когда сигнал выше порога.', TIPH, 'Смотрите на индикатор GR: он показывает, на сколько компрессор уменьшает уровень. Обычное значение — 1–2 dB.'],
+  'bc.ratio': ['Ratio', '1.5 … 10 : 1', 'Ручка задаёт силу сжатия. При 2:1 сигнал на 2 dB выше порога выходит на 1 dB выше порога.', TIPH, 'Для «склейки» микса используйте малые значения: 1.5:1 или 2:1.'],
+  'bc.attack': ['Attack', '0.1 … 30 ms', 'Ручка задаёт, как быстро компрессор начинает уменьшать уровень.', TIPH, 'Медленная атака пропускает удар бочки и малого барабана. Быстрая атака делает удары тише.'],
+  'bc.release': ['Release', '50 ms … 1.2 s, Auto', 'Ручка задаёт, как быстро компрессор возвращает уровень. В режиме Auto компрессор выбирает время по музыке.', TIPH, 'Если громкость «качается» в темп песни, увеличьте время или выберите Auto.'],
+  'bc.schpf': ['SC HPF', '20 … 300 Hz', 'Ручка задаёт фильтр для сигнала, который управляет компрессором. Этот фильтр не изменяет звук микса.', TIPH, 'Тогда бочка и низкие гитары не заставляют компрессор «качать» микс. Начните со 100 Hz.'],
+  'bc.mix': ['Mix', '0 … 100%', 'Ручка смешивает сжатый сигнал и исходный сигнал. 100% — только сжатый сигнал.', TIPH, 'Малое значение сохраняет удары барабанов. Этот приём называется параллельной компрессией.'],
+  'sat.low': ['Low', '0 … 24 dB', 'Ручка задаёт силу насыщения в полосе Low (ниже 150 Hz).', TIPH, 'Гармоники в полосе Low помогают услышать низкие частоты на маленьких колонках.'],
+  'sat.mid': ['Mid', '0 … 24 dB', 'Ручка задаёт силу насыщения в полосе Mid (150 Hz – 3 kHz).', TIPH, 'Малое значение делает середину плотнее. Большое значение даёт заметные искажения.'],
+  'sat.high': ['High', '0 … 24 dB', 'Ручка задаёт силу насыщения в полосе High (выше 3 kHz).', TIPW, 'Насыщение в полосе High добавляет «песок» гитарам. Используйте только малые значения.'],
+  'st.mid': ['Mid width', '0 … 200%', 'Ручка задаёт ширину стерео для средних частот. 0% — моно, 100% — без изменений, 200% — максимальная ширина.', TIPW, 'Большая ширина может ослабить звук в моно. Проверьте корреляцию на вкладке Stereo: она показывает, насколько похожи левый и правый каналы.'],
+  'st.high': ['High width', '0 … 200%', 'Ручка задаёт ширину стерео для высоких частот. 0% — моно, 100% — без изменений, 200% — максимальная ширина.', TIPH, 'Широкие высокие частоты дают «воздух». Проверьте звук в моно: тарелки не должны пропадать.'],
+  'mb.thresh': ['Thresh', '−60 … 0 dB', 'Ручка задаёт порог полосы. Компрессор полосы уменьшает уровень, только когда сигнал в полосе выше порога.', TIPH, 'Поверните ручку так, чтобы красная часть кольца появлялась только на ударах. Тогда полоса работает на пиках, а не всё время.'],
+  'st.guard': ['Guard thr', '−1.00 … +1.00', 'Ручка задаёт порог корреляции. Когда корреляция ниже порога, модуль уменьшает ширину стерео.', TIPH, 'Значение 0.00 защищает звук в моно и оставляет нормальную ширину.'],
+  'sat.drive': ['Drive', '0 … 24 dB', 'Ручка задаёт силу насыщения в полосе. Вы также можете тянуть полосу на графике вверх или вниз.', TIPH, 'Начните с 2–4 dB в полосе Low. Так бас лучше слышно на маленьких динамиках. В полосе High используйте малые значения: насыщение добавляет «песок».'],
+  'sat.asym': ['Asymmetry', '0 … 100%', 'Ручка делает насыщение несимметричным. Тогда модуль добавляет чётные гармоники, и звук становится теплее.', TIPH, 'Модуль сам удаляет постоянную составляющую (DC) после этой ступени. Отдельный фильтр не нужен.'],
+  'sat.mix': ['Mix', '0 … 100%', 'Ручка смешивает насыщенный сигнал полосы и исходный сигнал полосы. 100% — только насыщенный сигнал.', TIPH, 'Значение 30–60% добавляет плотность и сохраняет удары барабанов.'],
+  'sat.out': ['Output', '−12 … +12 dB', 'Ручка изменяет уровень полосы после насыщения.', TIPH, 'Насыщение делает полосу громче. Уменьшите Output, чтобы сравнить звук при той же громкости.'],
+  'cl.thr': ['Thresh', '−12 … 0 dBFS', 'Ручка задаёт уровень, выше которого Clipper срезает пики.', TIPH, 'Смотрите на значение Peak: оно показывает, на сколько Clipper срезает пики. Обычное значение — 0–4 dB.'],
+  'cl.mix': ['Mix', '0 … 100%', 'Ручка смешивает обработанный сигнал и исходный сигнал. 100% — только обработанный сигнал.', TIPH, 'Малое значение делает действие Clipper слабее.'],
+  'li.drive': ['Drive', '0 … 24 dB', 'Ручка поднимает уровень сигнала перед лимитером. Трек становится громче.', TIPW, 'Большое значение сплющивает удары барабанов. Сравните звук с Bypass, когда включён Match.'],
+  'li.ceil': ['Ceiling', '−3 … 0 dBTP', 'Ручка задаёт максимальный уровень true peak на выходе.', TIPH, 'Для стриминга используйте −1.0 dBTP. Так звук не перегружается после перевода в MP3 и AAC.'],
+  'li.rel': ['Release', '10 … 500 ms, Auto', 'Ручка задаёт, как быстро лимитер возвращает уровень после пика. В режиме Auto лимитер выбирает время по музыке.', TIPH, 'Короткое время даёт больше громкости, но добавляет искажения. Начните с Auto.'],
+  'li.la': ['Lookahead', '0.5 … 5 ms', 'Ручка задаёт, на сколько раньше лимитер видит пик. Лимитер начинает уменьшать уровень до пика.', TIPH, 'Большое значение делает удары мягче. Малое значение сохраняет атаку барабанов. Начните с 2 ms.'],
+  'out.gain': ['Gain', '−12 … +12 dB', 'Ручка изменяет уровень сигнала после всех модулей.', TIPW, 'Gain стоит после лимитера. Подъём уровня может дать true peak выше Ceiling. Обычно оставляйте 0.0 dB.'],
+};
+
+/* ---------- control tooltips (v4) ----------
+   Same writing rules as the knob tooltips (ASD-STE100). {n} is replaced by the element number. */
+const UITIPS = {
+  'pre.prev': ['Предыдущий пресет', '', 'Кнопка загружает предыдущий пресет из списка.', TIPH, 'Звёздочка * после имени показывает, что текущий пресет изменён и не сохранён.'],
+  'pre.next': ['Следующий пресет', '', 'Кнопка загружает следующий пресет из списка.', TIPH, 'Так удобно быстро сравнить несколько пресетов на одном месте песни.'],
+  'pre.list': ['Пресет', 'Djent Low-End Focus *', 'Список показывает заводские пресеты и ваши пресеты. Клик по имени загружает пресет.', TIPH, 'Заводские пресеты — это начальные точки, а не готовый мастеринг. Настройте пресет под ваш трек.'],
+  'pre.save': ['Save', '', 'Кнопка сохраняет изменения в текущий пресет.', TIPW, 'Старая версия пресета заменяется. Чтобы сохранить её, используйте Save As.'],
+  'pre.saveas': ['Save As', '', 'Кнопка сохраняет настройки как новый пресет с новым именем.', TIPH, 'Сделайте отдельный пресет для каждого альбома или звука.'],
+  'bypass': ['Bypass', 'вкл / выкл', 'Кнопка выключает всю цепочку обработки. Вы слышите исходный микс.', TIPH, 'Включите Match. Тогда вы сравниваете звук, а не громкость.'],
+  'match': ['Match', 'вкл / выкл', 'Кнопка выравнивает громкость при Bypass. Исходный микс играет с той же громкостью, что и обработанный звук.', TIPH, 'Громкий звук всегда кажется лучше. Держите Match включённым, когда вы сравниваете. Match работает только при прослушивании.'],
+  'mon': ['Monitor', 'Off, Headphones, Speakers', 'Список включает коррекцию звука для ваших наушников или колонок. Off — без коррекции.', TIPW, 'Коррекция изменяет только то, что вы слышите. При офлайн-рендере плагин выключает её сам. Перед рендером в реальном времени выключите её вручную.'],
+  'sys': ['System', 'Off, Laptop, Phone, Bluetooth, Earbuds, Car, Bookshelf', 'Список включает имитацию другой системы прослушивания. Имитация — примерная, это не измерение.', TIPH, 'Включите Laptop. Если главный рифф пропадает, низким нотам не хватает гармоник. Добавьте Translator в модуле Low-End.'],
+  'ref': ['Референс {n}', '', 'Кнопка выбирает референс {n}. Референс — готовый трек, с которым вы сравниваете свой звук.', TIPH, 'Используйте 3–6 треков того же жанра и строя. Плагин выравнивает громкость референса.'],
+  'ref.empty': ['Слот референса {n}', 'пусто', 'Слот пустой. Перетащите сюда файл WAV, FLAC, MP3 или OGG, или кликните, чтобы выбрать файл.', TIPH, 'Плагин анализирует весь файл в фоне. Это занимает несколько секунд.'],
+  'ab': ['A/B', 'A — ваш трек, B — референс', 'Переключатель выбирает, что вы слышите: A — ваш трек, B — выбранный референс.', TIPH, 'Громкость A и B выравнивается автоматически. Слушайте одно и то же место песни.'],
+  'sat.type': ['Тип насыщения', 'Tube, Tape, Transformer, Diode', 'Список выбирает характер насыщения в полосе. Клик по имени выбирает тип.', TIPH, 'Tube — мягко и тепло. Tape — сглаживает пики. Transformer — плотная середина. Diode — жёстче и ярче, используйте осторожно.'],
+  'sat.graph': ['График полос', 'Low, Mid, High', 'График показывает спектр на выходе и три полосы насыщения. Высота заливки полосы показывает Drive.', TIPH, 'Тяните полосу вверх или вниз, чтобы изменить Drive. Тяните жёлтую ручку влево или вправо, чтобы изменить частоту раздела.', 'Тянуть точку — Drive · тянуть жёлтую ручку — частота'],
+  'sat.curve': ['Кривая передачи', '', 'Кривая показывает, как полоса изменяет форму волны: вход по горизонтали, выход по вертикали. Яркая часть кривой — уровень сигнала сейчас.', TIPH, 'Сильный изгиб даёт больше гармоник. Прямая линия — звук без изменений.'],
+  'eq.add': ['Добавить полосу', 'двойной клик', 'Двойной клик по спектру добавляет полосу EQ в этой точке.', TIPH, 'У левого края (ниже 30 Hz) полоса становится Low cut. У правого края (выше 14 kHz) — High cut. В остальных местах — Bell.'],
+  'eq.field': ['Точное значение', 'клик — ввод', 'Клик открывает поле ввода. Введите значение и нажмите Enter.', TIPH, 'В поле Freq можно ввести ноту: E1, D#2, A4. Полоса встаёт точно на частоту ноты.'],
+  'eq.snap': ['Snap', 'вкл / выкл', 'Кнопка привязывает частоту полосы к нотам, когда вы тянете точку.', TIPH, 'Используйте Snap для низа: бочка и бас звучат на нотах строя. Срез точно по ноте убирает гул этой ноты.'],
+  'eq.pow': ['Полоса вкл/выкл', '', 'Кнопка выключает полосу. Настройки полосы сохраняются.', TIPH, 'Сравните звук с полосой и без неё. Двойной клик по точке делает то же самое.'],
+  'eq.del': ['Удалить полосу', 'Alt+клик по точке', 'Кнопка удаляет полосу со спектра.', TIPH, 'Чтобы только сравнить звук, выключите полосу кнопкой питания слева.'],
+  'size': ['Размер окна', '100% / 120%', 'Кнопка переключает размер окна: 100% (1280×800) и 120% (1536×960).', TIPH, 'Вы также можете тянуть край окна мышью. Плагин запоминает размер для всех проектов.'],
+  'tab.master': ['Вкладка Master', '', 'Вкладка показывает спектр, кривую эквалайзера и все модули обработки.', TIPH, 'Здесь вы изменяете звук.'],
+  'tab.eyes': ['Вкладка Eyes', '', 'Вкладка показывает все измерения на одном экране: тональный баланс, громкость, низкие частоты, стерео и проверки.', TIPH, 'Начните с этой вкладки. Красные и жёлтые проверки показывают, что исправить сначала.'],
+  'tab.lowend': ['Вкладка Low-End', '', 'Вкладка показывает подробный анализ низких частот: ноты, Mid и Side, форму волны.', TIPH, 'Используйте её для бочки и нижних нот 8- и 9-струнных гитар.'],
+  'tab.stereo': ['Вкладка Stereo', '', 'Вкладка показывает вектороскоп, корреляцию и ширину стерео по полосам. Вектороскоп — картинка ширины и баланса стерео.', TIPH, 'Проверьте, что низкие частоты стоят по центру.'],
+  'tab.spectrogram': ['Вкладка Spectrogram', '', 'Вкладка показывает спектр во времени. Цвет показывает уровень.', TIPH, 'Так видно короткие резонансы и «песок», которые обычный спектр усредняет.'],
+  'tab.album': ['Вкладка Album', '', 'Вкладка сравнивает треки альбома: громкость, тональный баланс и ширину.', TIPH, 'Используйте её, чтобы треки альбома звучали как одно целое.'],
+  'tab.overview': ['Вкладка Overview', '', 'Вкладка показывает спектр и список проверок.', TIPH, 'Увеличьте окно, чтобы увидеть все модули.'],
+  'tab.more': ['More', '', 'Список открывает остальные вкладки.', TIPH, 'В маленьком окне часть вкладок спрятана в этом списке.'],
+  'an.seg': ['Analyse', 'In / Out / Both', 'Переключатель выбирает сигнал для анализа: In — до обработки, Out — после обработки, Both — оба сигнала.', TIPH, 'Both показывает, что изменила обработка.'],
+  'an.reset': ['Reset', '', 'Кнопка сбрасывает накопленные измерения: интегральную громкость, пики и средний спектр.', TIPH, 'Нажмите Reset, когда вы начинаете слушать трек с начала.'],
+  'an.rop': ['Reset on play', 'вкл / выкл', 'Флажок сбрасывает измерения каждый раз, когда вы запускаете воспроизведение.', TIPH, 'Выключите флажок, если вы слушаете трек частями и хотите измерить весь трек.'],
+  'sp.mode': ['Вид спектра', 'Real-time / Average / Peak hold', 'Переключатель выбирает вид спектра: Real-time — сейчас, Average — среднее за время, Peak hold — максимум.', TIPH, 'Для сравнения с референсами используйте Average.'],
+  'sp.fft': ['FFT', 'размер анализа', 'Список задаёт размер анализа. Большой размер показывает низкие частоты точнее, но реагирует медленнее.', TIPH, 'Для нот 8-струнной гитары используйте 8192 или больше.'],
+  'sp.smooth': ['Сглаживание', '1/3 oct', 'Список задаёт сглаживание спектра. 1/3 oct — каждая точка усредняет треть октавы.', TIPH, 'Сильное сглаживание показывает общий баланс. Слабое сглаживание показывает отдельные ноты и резонансы.'],
+  'sp.tilt': ['Tilt', 'dB/oct', 'Список наклоняет график спектра. С наклоном 4.5 dB/oct сбалансированный микс выглядит почти ровным.', TIPH, 'Наклон изменяет только график. Звук не изменяется.'],
+  'sp.chan': ['Канал спектра', 'Stereo, Mid, Side, Left, Right', 'Список выбирает сигнал для спектра.', TIPH, 'Выберите Side, чтобы увидеть, что звучит только в стерео.'],
+  'sp.view': ['Curve / Delta', '', 'Переключатель выбирает вид: Curve — спектр, Delta — разница между вашим треком и референсами.', TIPH, 'В режиме Delta линия выше нуля показывает частоты, которые громче, чем у референсов.'],
+  'eq.node': ['Полоса EQ {n}', 'точка на спектре', 'Точка показывает частоту и усиление полосы {n}. Тяните точку: изменяются частота и усиление.', TIPH, 'Колёсико мыши изменяет Q (у Low cut и High cut — крутизну). Shift — точная настройка. Двойной клик — полоса вкл/выкл. Alt+клик — удалить полосу. Правый клик — меню.', 'Тянуть — частота и усиление · колёсико — Q'],
+  'eq.band': ['Полоса EQ {n}', '', 'Кнопка выбирает полосу {n}. Ручки ниже изменяют выбранную полосу.', TIPH, 'Яркие номера — включённые полосы. Тусклые номера — выключенные полосы.'],
+  'eq.phase': ['Режим фазы', 'Min phase / Linear phase', 'Переключатель выбирает режим фазы для Dynamic EQ и Multiband.', TIPH, 'Min phase не добавляет задержку. Linear phase добавляет задержку и может давать тихий звук перед ударом. Начните с Min phase.'],
+  'in.polL': ['Ø L', 'вкл / выкл', 'Кнопка переворачивает фазу левого канала: волна становится зеркальной.', TIPW, 'Используйте кнопку, только если канал записан с перевёрнутой фазой. Иначе бас пропадает в моно.'],
+  'in.polR': ['Ø R', 'вкл / выкл', 'Кнопка переворачивает фазу правого канала: волна становится зеркальной.', TIPW, 'Используйте кнопку, только если канал записан с перевёрнутой фазой. Иначе бас пропадает в моно.'],
+  'bc.model': ['Модель компрессора', 'VCA / Punch', 'Переключатель выбирает характер компрессора. VCA — чистая склейка. Punch — быстрее и агрессивнее.', TIPH, 'Для мастеринга начните с VCA.'],
+  'cl.type': ['Тип среза', 'Hard, Soft, Soft knee, Diode', 'Список выбирает форму среза пиков.', TIPH, 'Soft звучит мягче. Hard сохраняет больше атаки, но даёт больше искажений.'],
+  'cl.lowprot': ['Low protect', 'вкл / выкл', 'Переключатель уменьшает срез ниже 150 Hz.', TIPH, 'Держите его включённым. Так Clipper не искажает бас и бочку.'],
+  'li.mode': ['Режим лимитера', 'Transparent, Balanced, Aggressive', 'Список выбирает характер лимитера.', TIPH, 'Transparent меньше изменяет звук. Aggressive даёт больше громкости, но сильнее сплющивает удары.'],
+  'out.dither': ['Dither', 'Off, TPDF, Noise-shaped', 'Список включает дизеринг для экспорта в 16 bit.', TIPW, 'Включайте дизеринг, только если вы экспортируете в 16 bit. Не включайте его дважды: в плагине и в REAPER.'],
+  'tb.mode': ['Время измерения', 'Integrated / Last 10 s', 'Переключатель выбирает время измерения: Integrated — весь трек с начала, Last 10 s — последние 10 секунд.', TIPH, 'Используйте Last 10 s, чтобы проверить отдельную часть песни: куплет или припев.'],
+  'tb.target': ['Цель тонального баланса', 'Ref set, …', 'Список выбирает цель для тонального баланса: набор референсов или сохранённую цель.', TIPH, 'Используйте 3–6 референсов в том же жанре. Тогда цель надёжнее.'],
+  'ld.target': ['Цель громкости', 'Streaming ref, …', 'Список выбирает цель громкости для сравнения.', TIPH, 'Стриминговые сервисы делают громкие треки тише. Цель — справка, а не обязательное значение.'],
+  'le.open': ['Open Low-End tab', '', 'Кнопка открывает вкладку Low-End с подробным анализом низких частот.', TIPH, 'Используйте её, если проверки Sub или Low-band corr. жёлтые или красные.'],
+};
+const MODKEY = { 'Input': 'in', 'Dynamic EQ': 'eq', 'Multiband': 'mb', 'Low-End': 'le', 'Bus Comp': 'bc', 'Saturation': 'sat', 'Stereo': 'st', 'Clipper': 'cl', 'Limiter': 'li', 'Output': 'out' };
+function tagAll() {
+  const txt = el => el.textContent.trim();
+  const tag = (sel, id, test) => win.querySelectorAll(sel).forEach((el, i) => {
+    if (!test || test(el)) el.dataset.t = typeof id === 'function' ? id(el, i) : id;
+  });
+  tag('.top .btn.ic', (el, i) => i ? 'pre.next' : 'pre.prev');
+  tag('.top .dd', 'pre.list', el => el.querySelector('.tx'));
+  tag('.top .btn', 'pre.save', el => txt(el) === 'Save');
+  tag('.top .btn', 'pre.saveas', el => txt(el) === 'Save As');
+  tag('.top .btn', 'bypass', el => txt(el) === 'Bypass');
+  tag('.top .btn', 'match', el => txt(el) === 'Match');
+  tag('.monGrp .dd', (el, i) => i ? 'sys' : 'mon');
+  win.querySelectorAll('.top .ref').forEach((el, i) => { el.dataset.t = el.classList.contains('empty') ? 'ref.empty' : 'ref'; el.dataset.n = i + 1; });
+  tag('.top .seg', 'ab', el => txt(el) === 'AB');
+  tag('.top .btn.size', 'size');
+  tag('.tabs .tab', el => 'tab.' + txt(el).replace(' ▾', '').toLowerCase().replace('-', ''));
+  tag('.tabs .right .seg', 'an.seg');
+  tag('.tabs .right .btn', 'an.reset');
+  tag('.tabs .chk', 'an.rop');
+  win.querySelectorAll('.panel').forEach(panel => {
+    const h = panel.querySelector('.ph h3'); if (!h) return;
+    const name = txt(h);
+    panel.querySelectorAll('.ph .seg, .ph .dd, .ph .btn').forEach(el => {
+      const t = txt(el);
+      if (name === 'Spectrum') {
+        if (/Real-time|RT/.test(t)) el.dataset.t = 'sp.mode';
+        else if (/Curve/.test(t)) el.dataset.t = 'sp.view';
+        else if (/FFT/.test(t)) el.dataset.t = 'sp.fft';
+        else if (/oct|^1\/3/.test(t) && !/Tilt/.test(t)) el.dataset.t = 'sp.smooth';
+        else if (/Tilt/.test(t)) el.dataset.t = 'sp.tilt';
+        else if (/Stereo/.test(t)) el.dataset.t = 'sp.chan';
+      }
+      if (/Integrated/.test(t)) el.dataset.t = 'tb.mode';
+      if (/Target: Ref/.test(t)) el.dataset.t = 'tb.target';
+      if (/Target: Streaming/.test(t)) el.dataset.t = 'ld.target';
+      if (/Open Low-End/.test(t)) el.dataset.t = 'le.open';
+    });
+  });
+  tag('.card .chd', 'mod.hdr');
+  tag('.card .chd .r', 'eq.phase', el => txt(el) === 'Min phase');
+  tag('.card .chd .r', 'bc.model', el => txt(el) === 'VCA');
+  tag('.card .chd .r', 'cl.lowprot', el => txt(el) === 'Low protect');
+  tag('.card .btn', 'in.polL', el => txt(el) === 'Ø L');
+  tag('.card .btn', 'in.polR', el => txt(el) === 'Ø R');
+  win.querySelectorAll('.bandchips span').forEach((el, i) => { el.dataset.t = 'eq.band'; el.dataset.n = i + 1; });
+  tag('.card .dd', 'cl.type', el => txt(el).startsWith('Soft'));
+  tag('.card .dd', 'li.mode', el => txt(el).startsWith('Balanced'));
+  tag('.card .dd', 'out.dither', el => txt(el).startsWith('Dither'));
+}
+const kt = document.createElement('div'); kt.className = 'ktip'; kt.style.display = 'none';
+const nw = t => t.replace(/(\d[\d.]*–\d[\d.]*|\d[\d.]*) (Hz|kHz|dB|ms)/g, '<span style="white-space:nowrap">$1&nbsp;$2</span>');
+const sec = (label, text, warn) => `<div class="s ${warn ? 'w' : ''}"><i>${label}</i><span>${nw(text)}</span></div>`;
+function tipHtml(el) {
+  if (el.dataset.k) {
+    const id = el.dataset.k, d = KTIPS[id]; if (!d) return '';
+    const [mod, modText] = KMOD[id.split('.')[0]];
+    const off = !!el.closest('.card.off');
+    const mtr = el.dataset.meter === 'inv' ? sec('Индикатор', 'Внешнее кольцо показывает корреляцию сейчас. Зелёный цвет — корреляция выше порога. Красный цвет — корреляция ниже порога: модуль уменьшает ширину стерео.')
+      : el.dataset.meter ? sec('Индикатор', 'Внешнее кольцо показывает уровень сигнала сейчас. Зелёная часть — сигнал ниже порога. Красная часть — сигнал выше порога: модуль уменьшает уровень. Белая черта — порог.') : '';
+    return `<div class="h"><b>${mod} · ${d[0]}</b><span>${d[1]}</span></div>`
+      + (off ? sec('Статус', 'Модуль выключен (Bypassed). Ручка сейчас не изменяет звук.', true) : '')
+      + sec('Модуль', modText) + sec('Ручка', d[2]) + mtr + sec(d[3], d[4], d[3] === TIPW)
+      + `<div class="f"><span>Двойной клик — сброс · Shift — точно</span></div>`;
+  }
+  const id = el.dataset.t;
+  if (id === 'tb.band') return tbTip(+el.dataset.b, +el.dataset.v);
+  if (id === 'mod.hdr') {
+    const card = el.closest('.card'), name = card.querySelector('.chd b').textContent, [mod, modText] = KMOD[MODKEY[name]];
+    const off = card.classList.contains('off');
+    return `<div class="h"><b>${mod}</b><span>${off ? 'выключен' : 'включён'}</span></div>`
+      + (off ? sec('Статус', 'Модуль выключен (Bypassed). Он не изменяет звук.', true) : '')
+      + sec('Что делает', modText)
+      + sec(TIPH, 'Зелёная точка показывает, что модуль включён. Клик по точке включает и выключает модуль. Сравнивайте звук на одном и том же месте песни.')
+      + `<div class="f"><span>Клик по точке — вкл/выкл</span></div>`;
+  }
+  const d = UITIPS[id]; if (!d) return '';
+  const n = el.dataset.n || '', f = t => t.replaceAll('{n}', n);
+  return `<div class="h"><b>${f(d[0])}</b><span>${f(d[1])}</span></div>`
+    + sec('Что делает', f(d[2])) + sec(d[3], f(d[4]), d[3] === TIPW)
+    + (d[5] ? `<div class="f"><span>${d[5]}</span></div>` : '');
+}
+function showTip(el) {
+  const html = tipHtml(el); if (!html) return;
+  kt.innerHTML = html;
+  kt.style.width = el.dataset.t === 'tb.band' ? '410px' : '';
+  kt.style.display = 'block';
+  const wr = win.getBoundingClientRect(), sc = wr.width / DW, r = el.getBoundingClientRect();
+  const kx = (r.left - wr.left) / sc, ky = (r.top - wr.top) / sc, kw = r.width / sc, kh = r.height / sc;
+  const tw = kt.offsetWidth, th = kt.offsetHeight, gap = 10;
+  const x = Math.max(8, Math.min(DW - tw - 8, kx + kw / 2 - tw / 2));
+  const up = ky - th - gap >= 8;
+  const y = up ? ky - th - gap : Math.min(DH - th - 8, ky + kh + gap);
+  kt.className = 'ktip ' + (up ? 'up' : 'dn');
+  kt.style.left = x + 'px'; kt.style.top = y + 'px';
+  kt.style.setProperty('--ax', (kx + kw / 2 - x) + 'px');
+  clearHov();
+  el.classList.add(el.dataset.k ? 'hov' : 'thov');
+}
+const showKnobTip = showTip;
+function clearHov() { win.querySelectorAll('.hov,.thov').forEach(k => k.classList.remove('hov', 'thov')); }
+function hideKnobTip() { kt.style.display = 'none'; clearHov(); }
+let ktTimer = 0, tipTarget = null;
+function bindKnobs() { tagAll(); }
+win.addEventListener('mouseover', e => {
+  const el = e.target.closest('[data-k],[data-t]');
+  if (el === tipTarget) return;
+  tipTarget = el; clearTimeout(ktTimer); hideKnobTip();
+  if (el) ktTimer = setTimeout(() => showTip(el), 500);
+});
+win.addEventListener('mouseleave', () => { tipTarget = null; clearTimeout(ktTimer); hideKnobTip(); });
+win.addEventListener('mousedown', () => { clearTimeout(ktTimer); hideKnobTip(); });
+
+/* ---------- interactive mockup (v2): mockup bar and clickable window parts ---------- */
+function toast(text) {
+  const t = document.getElementById('mToast'); if (!t) return;
+  t.textContent = text; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => { t.hidden = true; }, 2600);
+}
+function setView(v) { VIEW = v; render(); }
+function bindWindow() {
+  win.querySelectorAll('.tab').forEach(el => el.addEventListener('click', () => {
+    const n = el.textContent.trim();
+    if (n === 'Master') setView('master');
+    else if (n === 'Eyes') setView('eyes');
+    else if (n === 'Overview') setView('compact');
+    else toast(`Вкладка ${n.replace(' ▾', '')} будет в следующих макетах.`);
+  }));
+  win.querySelectorAll('[data-mod]').forEach(el => el.addEventListener('click', () => { MOD = el.dataset.mod; render(); }));
+  win.querySelectorAll('.ti[data-type]').forEach(el => el.addEventListener('click', () => { SAT[+el.dataset.band].type = el.dataset.type; render(); }));
+  win.querySelectorAll('[data-satb]').forEach(el => el.addEventListener('click', () => { SATB = +el.dataset.satb; render(); }));
+  const svgPt = (svg, e) => { const r = svg.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * +svg.dataset.w, (e.clientY - r.top) / r.height * +svg.dataset.h]; };
+  win.querySelectorAll('.sdrag,.xdrag').forEach(el => el.addEventListener('mousedown', e => {
+    e.preventDefault(); e.stopPropagation();
+    const band = el.dataset.band, xi = el.dataset.x;
+    const move = ev => {
+      const svg = win.querySelector('.satg svg'); if (!svg) return;
+      const [x, y] = svgPt(svg, ev), W = +svg.dataset.w, H = +svg.dataset.h;
+      if (band !== undefined) SAT[+band].drive = Math.round(Math.max(0, Math.min(24, (H - 18 - y) / (H - 40) * 24)) * 2) / 2;
+      else { const f = 20 * Math.pow(1000, Math.max(0, Math.min(1, x / W))); SATX[+xi] = xi === '0' ? Math.max(60, Math.min(500, f)) : Math.max(1000, Math.min(10000, f)); }
+      render();
+    };
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+  }));
+  const mon = win.querySelector('.monGrp');
+  if (mon) mon.addEventListener('click', () => { MON = !MON; render(); });
+  const size = win.querySelector('.btn.size');
+  if (size) size.addEventListener('click', () => { if (COMPACT) { VIEW = 'master'; SIZE = 100; } else SIZE = SIZE === 100 ? 120 : 100; render(); });
+  const sub = win.querySelector('.ck'), tip = win.querySelector('#subTip');
+  if (sub && tip && VIEW === 'eyes') {
+    sub.addEventListener('mouseenter', () => { tip.style.display = 'block'; sub.classList.add('hl'); });
+    sub.addEventListener('mouseleave', () => { if (!TIP) { tip.style.display = 'none'; sub.classList.remove('hl'); } });
+  }
+}
+function syncBar() {
+  document.querySelectorAll('#mbar [data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === VIEW));
+  document.querySelectorAll('#mbar [data-size]').forEach(b => b.classList.toggle('on', !COMPACT && +b.dataset.size === SIZE));
+  const m = document.getElementById('mMon');
+  if (m) { m.classList.toggle('on', MON); m.textContent = MON ? 'Мониторинг: вкл' : 'Мониторинг: выкл'; }
+}
+function render() {
+  COMPACT = VIEW === 'compact' || VIEW === 'cmaster'; DW = COMPACT ? 640 : 1280; DH = COMPACT ? 400 : VIEW === 'knobs' ? 330 : VIEW === 'tbtips' ? 1120 : 800;
+  win.className = 'win' + (MON ? ' monitor' : '') + (COMPACT ? ' c' : '');
+  win.style.width = DW + 'px'; win.style.height = DH + 'px';
+  if (VIEW === 'knobs') win.innerHTML = knobSheet(); else if (VIEW === 'tbtips') win.innerHTML = tbSheet(); else win.innerHTML = topBar() + tabs(VIEW === 'cmaster' ? 'Master' : COMPACT ? 'Overview' : VIEW === 'eyes' ? 'Eyes' : 'Master') + (VIEW === 'cmaster' ? compactMaster() : COMPACT ? compact() : VIEW === 'eyes' ? eyes() : master()) + footer();
+  kt.style.display = 'none'; win.appendChild(kt);
+  win.classList.toggle('shot', SHOT);
+  bindKnobs(); if (!SHOT) { bindWindow(); bindSpectrum(); }
+  syncBar(); fit();
+}
+const mbar = document.getElementById('mbar');
+if (SHOT) mbar.hidden = true;
+else {
+  mbar.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
+  mbar.querySelectorAll('[data-size]').forEach(b => b.addEventListener('click', () => { SIZE = +b.dataset.size; if (COMPACT) VIEW = 'master'; render(); }));
+  document.getElementById('mMon').addEventListener('click', () => { MON = !MON; render(); });
+}
+render();
+if (document.fonts) document.fonts.ready.then(fit);
+const PIN = P.get('knob');
+if (PIN) { const el = document.querySelector(`.knob[data-k="${PIN}"]`); if (el) (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => showTip(el)); }
+const PINT = P.get('t');
+if (PINT) { const [tid, idx] = PINT.split(':'); const el = document.querySelectorAll(`[data-t="${tid}"]`)[+idx || 0]; if (el) (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => showTip(el)); }
+</script>
+</body>
+</html>
