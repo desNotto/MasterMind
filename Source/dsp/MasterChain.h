@@ -69,6 +69,14 @@ public:
 
     double getSampleRate() const noexcept { return fs; }
 
+    /** Sample overs and inter-sample overs before the limiter (spec 5.9), counted on the audio thread. */
+    std::atomic<uint64_t> preLimiterSampleOvers { 0 }, preLimiterTpOvers { 0 };
+    void resetOvers() noexcept { preLimiterSampleOvers = 0; preLimiterTpOvers = 0; }
+
+    /** Clipper peak reduction of the last block and per-sample limiter gain reduction (dB). */
+    float clipperReductionDb() const noexcept { return clipModule.peakReductionDb(); }
+    const float* limiterTrace() const noexcept { return slots[limiter].on ? limModule.lastGainReduction() : nullptr; }
+
     /** Settings snapshots read from the parameters (any thread). */
     DynamicEq::Settings eqSnapshot() const;
     Multiband::Settings multibandSnapshot() const;
@@ -104,6 +112,7 @@ private:
     OutputStage outputModule;
 
     std::array<Slot, numModules> slots;
+    std::array<TruePeakDetector, 2> preLimTp;
     juce::AudioBuffer<float> dry;
     double fs = 48000.0;
     int maxBlock = 512;

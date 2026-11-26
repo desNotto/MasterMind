@@ -1,7 +1,9 @@
 #pragma once
 
+#include "analysis/Engine.h"
 #include "dsp/LoadMeter.h"
 #include "dsp/MasterChain.h"
+#include "monitoring/Monitoring.h"
 #include "state/Parameters.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -10,7 +12,7 @@ class MasterMindProcessor final : public juce::AudioProcessor
 {
 public:
     MasterMindProcessor();
-    ~MasterMindProcessor() override = default;
+    ~MasterMindProcessor() override;
 
     // Audio
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
@@ -45,11 +47,38 @@ public:
     float getCpuLoad() const noexcept { return loadMeter.getLoadProportion(); }
 
     juce::AudioProcessorValueTreeState& getValueTreeState() noexcept { return parameters; }
+    mm::dsp::MasterChain& getChain() noexcept { return chain; }
+    mm::analysis::Engine& getEngine() noexcept { return engine; }
+    mm::monitoring::Monitoring& getMonitoring() noexcept { return monitoring; }
+
+    /** Non-parameter state stored with the project: reference paths, reference set, album path,
+        correction profile paths, preset name and its modified flag (spec section 9). Message thread. */
+    juce::ValueTree& getExtraState() noexcept { return extraState; }
+
+    /** Called after setStateInformation on the message thread (the editor and libraries listen). */
+    std::function<void()> onStateRestored;
+
+    std::atomic<bool> resetOnPlay { true };
+    std::atomic<bool> monitorActive { false };
 
 private:
+    class Worker;
+
     juce::AudioProcessorValueTreeState parameters;
+    juce::ValueTree extraState { "Extra" };
     mm::dsp::MasterChain chain;
     mm::dsp::LoadMeter loadMeter;
+    mm::analysis::Engine engine;
+    mm::monitoring::Monitoring monitoring;
+    std::unique_ptr<Worker> worker;
+
+    juce::AudioBuffer<float> inCopy, delayedIn;
+    mm::dsp::DelayLine inputDelay;
+    int maxBlock = 512;
+    bool wasPlaying = false;
+    std::atomic<float>* ceilingParam = nullptr;
+    std::atomic<float>* monoFreqParam = nullptr;
+    std::shared_ptr<bool> alive = std::make_shared<bool> (true);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MasterMindProcessor)
 };

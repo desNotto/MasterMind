@@ -440,8 +440,20 @@ bool MasterChain::process (juce::AudioBuffer<float>& buffer) noexcept
         float* bl = l + start;
         float* br = r + start;
 
-        for (auto& s : slots)
+        for (size_t si = 0; si < slots.size(); ++si)
         {
+            auto& s = slots[si];
+            if (si == limiter)
+            {
+                uint64_t sampleOvers = 0, tpOvers = 0;
+                for (int i = 0; i < n; ++i)
+                {
+                    sampleOvers += (std::abs (bl[i]) > 1.0f) + (std::abs (br[i]) > 1.0f);
+                    tpOvers += (preLimTp[0].process (bl[i]) > 1.0f) + (preLimTp[1].process (br[i]) > 1.0f);
+                }
+                preLimiterSampleOvers.fetch_add (sampleOvers, std::memory_order_relaxed);
+                preLimiterTpOvers.fetch_add (tpOvers, std::memory_order_relaxed);
+            }
             const bool want = s.onParam->load (std::memory_order_relaxed) >= 0.5f;
             if (want && ! s.on && s.fade <= 0.0)
                 s.module->reset(); // start clean, fade in from the delayed dry signal
