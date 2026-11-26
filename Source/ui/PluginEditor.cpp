@@ -20,7 +20,10 @@ constexpr float minTextPx = 11.0f;
 mm::window::Size primaryWorkArea()
 {
     if (const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
-        return { display->userArea.getWidth(), display->userArea.getHeight() };
+    {
+        const auto area = display->userBounds.toNearestIntEdges();
+        return { area.getWidth(), area.getHeight() };
+    }
 
     return {};
 }
