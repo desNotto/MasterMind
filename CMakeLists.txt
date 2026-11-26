@@ -182,6 +182,25 @@ if(MM_BUILD_TESTS)
         juce::juce_audio_processors
         juce::juce_recommended_config_flags)
     add_dependencies(MasterMindBinaryTest ${MM_PRODUCT_NAME}_VST3)
+
+    # Layout harness: renders the editor at the spec sizes and checks overlaps (spec section 10).
+    juce_add_gui_app(MasterMindUiTest PRODUCT_NAME "MasterMindUiTest")
+    set(MM_UI_TEST_SOURCES ${CMAKE_SOURCE_DIR}/tests/UiHarness.cpp)
+    mm_strict_sources(${MM_UI_TEST_SOURCES})
+    target_sources(MasterMindUiTest PRIVATE ${MM_UI_TEST_SOURCES} ${MM_PLUGIN_SOURCES})
+    target_compile_definitions(MasterMindUiTest PRIVATE
+        ${MM_COMMON_DEFINITIONS}
+        JucePlugin_Name="MasterMind"
+        JUCE_STANDALONE_APPLICATION=1
+        JUCE_USE_WIN_WEBVIEW2=0
+        JUCE_MODAL_LOOPS_PERMITTED=1)
+    target_link_libraries(MasterMindUiTest PRIVATE
+        mastermind_core
+        juce::juce_audio_processors
+        juce::juce_gui_basics
+        juce::juce_recommended_config_flags)
+    set_target_properties(MasterMindUiTest PROPERTIES WIN32_EXECUTABLE FALSE)
+    add_test(NAME ui_layout_test COMMAND MasterMindUiTest ${CMAKE_BINARY_DIR}/ui-snapshots)
     add_test(NAME binary_null_test
         COMMAND MasterMindBinaryTest ${MM_DIST_DIR}/${MM_PRODUCT_NAME}.vst3)
 endif()

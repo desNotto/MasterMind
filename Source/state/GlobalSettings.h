@@ -34,6 +34,10 @@ public:
         could not be written. */
     bool saveWindowSize (window::Size size) const;
 
+    /** Generic top-level value (language, thresholds, analysis defaults ...). */
+    juce::var get (const juce::String& key, const juce::var& fallback = {}) const;
+    bool set (const juce::String& key, const juce::var& value) const;
+
 private:
     juce::var readJson() const;
     bool writeJson (const juce::var& root) const;

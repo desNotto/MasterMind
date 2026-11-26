@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 
+#include "state/GlobalSettings.h"
 #include "ui/PluginEditor.h"
 
 namespace
@@ -42,13 +43,83 @@ MasterMindProcessor::MasterMindProcessor()
     parameters.state.setProperty (stateVersionKey, stateVersion, nullptr);
     ceilingParam = parameters.getRawParameterValue ("lim_ceiling");
     monoFreqParam = parameters.getRawParameterValue ("lem_mono_freq");
+    const auto dataDir = mm::GlobalSettings::userDataDirectory();
+    presets = std::make_unique<mm::presets::PresetManager> (parameters, dataDir.getChildFile ("presets"));
+    references = std::make_unique<mm::reference::ReferenceLibrary> (monitoring, dataDir.getChildFile ("refcache"));
     worker = std::make_unique<Worker> (*this);
 }
 
 MasterMindProcessor::~MasterMindProcessor()
 {
+    alive.reset();
     worker.reset();
+    references.reset();
     engine.shutdown();
+}
+
+void MasterMindProcessor::syncExtraState()
+{
+    extraState.removeAllChildren (nullptr);
+    extraState.appendChild (presets->toState(), nullptr);
+    extraState.appendChild (references->toState(), nullptr);
+    extraState.setProperty ("album", album.getFile().getFullPathName(), nullptr);
+    extraState.setProperty ("correction1", correctionFiles[0].getFullPathName(), nullptr);
+    extraState.setProperty ("correction2", correctionFiles[1].getFullPathName(), nullptr);
+    extraState.setProperty ("correctionStrength", correctionStrength, nullptr);
+    extraState.setProperty ("correctionBoostLimit", correctionBoostLimit, nullptr);
+    extraState.setProperty ("correctionCutOnly", correctionCutOnly, nullptr);
+}
+
+void MasterMindProcessor::reloadCorrection (int slot)
+{
+    slot = juce::jlimit (0, 1, slot);
+    const auto f = correctionFiles[slot];
+    if (! f.existsAsFile())
+    {
+        monitoring.setCorrection (slot, nullptr);
+        return;
+    }
+    const double fs = getSampleRate() > 0 ? getSampleRate() : 48000.0;
+    if (f.hasFileExtension ("wav;aif;aiff;flac"))
+    {
+        std::unique_ptr<juce::AudioFormatReader> r (mm::reference::formatManager().createReaderFor (f));
+        if (r != nullptr && r->lengthInSamples > 0 && r->lengthInSamples < (juce::int64) r->sampleRate * 10)
+        {
+            juce::AudioBuffer<float> ir ((int) std::min<unsigned> (2, r->numChannels), (int) r->lengthInSamples);
+            r->read (&ir, 0, (int) r->lengthInSamples, 0, true, true);
+            monitoring.setCorrectionImpulse (slot, std::move (ir), r->sampleRate);
+            auto set = std::make_unique<mm::monitoring::Monitoring::FilterSet>();
+            set->useConvolution = true;
+            monitoring.setCorrection (slot, std::move (set));
+        }
+        return;
+    }
+    mm::monitoring::ParametricProfile p;
+    juce::String err;
+    if (mm::monitoring::parseParametric (f.loadFileAsString(), p, err))
+        monitoring.setCorrection (slot, mm::monitoring::Monitoring::buildCorrection (p, fs, correctionStrength, correctionBoostLimit, correctionCutOnly));
+}
+
+void MasterMindProcessor::restoreExtraState()
+{
+    presets->fromState (extraState.getChildWithName ("Preset"));
+    references->fromState (extraState.getChildWithName ("References"));
+    const juce::String albumPath = extraState.getProperty ("album", "");
+    if (albumPath.isNotEmpty() && juce::File::isAbsolutePath (albumPath) && juce::File (albumPath).existsAsFile())
+    {
+        juce::String err;
+        album.open (juce::File (albumPath), err);
+    }
+    for (int i = 0; i < 2; ++i)
+    {
+        const juce::String path = extraState.getProperty ("correction" + juce::String (i + 1), "");
+        correctionFiles[i] = path.isNotEmpty() && juce::File::isAbsolutePath (path) ? juce::File (path) : juce::File();
+    }
+    correctionStrength = extraState.getProperty ("correctionStrength", 1.0f);
+    correctionBoostLimit = extraState.getProperty ("correctionBoostLimit", 3.0f);
+    correctionCutOnly = extraState.getProperty ("correctionCutOnly", true);
+    reloadCorrection (0);
+    reloadCorrection (1);
 }
 
 void MasterMindProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -58,6 +129,14 @@ void MasterMindProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     loadMeter.prepare (sampleRate);
     engine.prepare (sampleRate);
     monitoring.prepare (sampleRate, maxBlock);
+    juce::MessageManager::callAsync ([weak = std::weak_ptr<bool> (alive), this]
+    {
+        if (! weak.expired())
+        {
+            reloadCorrection (0);
+            reloadCorrection (1);
+        }
+    });
     inCopy.setSize (2, maxBlock, false, true, false);
     delayedIn.setSize (2, maxBlock, false, true, false);
     inputDelay.prepare (2, 60000);
@@ -149,6 +228,8 @@ juce::AudioProcessorEditor* MasterMindProcessor::createEditor()
 
 void MasterMindProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
+    if (juce::MessageManager::existsAndIsCurrentThread())
+        syncExtraState();
     auto state = parameters.copyState();
     state.setProperty (stateVersionKey, stateVersion, nullptr);
     state.removeChild (state.getChildWithName ("Extra"), nullptr);
@@ -183,7 +264,10 @@ void MasterMindProcessor::setStateInformation (const void* data, int sizeInBytes
     // Monitoring is never restored from a project (spec 6.0 rule 4).
     juce::MessageManager::callAsync ([weak = std::weak_ptr<bool> (alive), this]
     {
-        if (! weak.expired() && onStateRestored)
+        if (weak.expired())
+            return;
+        restoreExtraState();
+        if (onStateRestored)
             onStateRestored();
     });
 }

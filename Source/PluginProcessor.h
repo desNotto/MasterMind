@@ -1,9 +1,12 @@
 #pragma once
 
+#include "album/Album.h"
 #include "analysis/Engine.h"
 #include "dsp/LoadMeter.h"
 #include "dsp/MasterChain.h"
 #include "monitoring/Monitoring.h"
+#include "presets/PresetManager.h"
+#include "reference/ReferenceLibrary.h"
 #include "state/Parameters.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -55,8 +58,22 @@ public:
         correction profile paths, preset name and its modified flag (spec section 9). Message thread. */
     juce::ValueTree& getExtraState() noexcept { return extraState; }
 
-    /** Called after setStateInformation on the message thread (the editor and libraries listen). */
+    /** Called after setStateInformation on the message thread (the editor listens). */
     std::function<void()> onStateRestored;
+
+    // Message-thread services that live as long as the plugin instance
+    mm::presets::PresetManager& getPresets() noexcept { return *presets; }
+    mm::reference::ReferenceLibrary& getReferences() noexcept { return *references; }
+    mm::album::AlbumFile& getAlbum() noexcept { return album; }
+
+    /** Copies preset, reference and album state into the project state (message thread). */
+    void syncExtraState();
+
+    /** Monitor correction profile files (project state, spec 9). */
+    juce::File correctionFiles[2];
+    float correctionStrength = 1.0f, correctionBoostLimit = 3.0f;
+    bool correctionCutOnly = true;
+    void reloadCorrection (int slot);
 
     std::atomic<bool> resetOnPlay { true };
     std::atomic<bool> monitorActive { false };
@@ -71,6 +88,10 @@ private:
     mm::analysis::Engine engine;
     mm::monitoring::Monitoring monitoring;
     std::unique_ptr<Worker> worker;
+    std::unique_ptr<mm::presets::PresetManager> presets;
+    std::unique_ptr<mm::reference::ReferenceLibrary> references;
+    mm::album::AlbumFile album;
+    void restoreExtraState();
 
     juce::AudioBuffer<float> inCopy, delayedIn;
     mm::dsp::DelayLine inputDelay;

@@ -591,10 +591,18 @@ void powerToDisplay (const std::vector<float>& power, double fs, int fftSize, co
         }
         else
         {
-            const double f0 = f * std::pow (2.0, -width * 0.5), f1 = f * std::pow (2.0, width * 0.5);
-            const int k0 = std::clamp ((int) std::floor (f0 / binHz + 0.5), 0, bins - 1);
-            const int k1 = std::clamp ((int) std::floor (f1 / binHz + 0.5), k0 + 1, bins);
-            const double e = (prefix[(size_t) k1] - prefix[(size_t) k0]) * (1.0 / 3.0) / width; // per 1/3 octave
+            // fractional bin edges (linear interpolation of the prefix sum) give a smooth curve even
+            // where a band is narrower than a few FFT bins
+            const auto prefixAt = [&] (double pos)
+            {
+                pos = std::clamp (pos, 0.0, (double) bins);
+                const int k = std::min ((int) pos, bins - 1);
+                return prefix[(size_t) k] + (pos - k) * power[(size_t) k];
+            };
+            const double p0 = f * std::pow (2.0, -width * 0.5) / binHz + 0.5, p1 = f * std::pow (2.0, width * 0.5) / binHz + 0.5;
+            const double span = std::max (1.0, p1 - p0);
+            const double centre = 0.5 * (p0 + p1);
+            const double e = (prefixAt (centre + 0.5 * span) - prefixAt (centre - 0.5 * span)) * (p1 - p0) / span * (1.0 / 3.0) / width; // per 1/3 octave
             outDb[i] = (float) (safeDb (e) + (tiltDbPerOct - 3.0103) * oct);
         }
     }

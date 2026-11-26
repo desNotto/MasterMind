@@ -111,4 +111,20 @@ bool GlobalSettings::saveWindowSize (window::Size size) const
 
     return writeJson (root);
 }
+juce::var GlobalSettings::get (const juce::String& key, const juce::var& fallback) const
+{
+    const auto root = readJson();
+    return root.isObject() && root.hasProperty (key) ? root.getProperty (key, fallback) : fallback;
+}
+
+bool GlobalSettings::set (const juce::String& key, const juce::var& value) const
+{
+    auto root = readJson();
+    if (! root.isObject())
+        root = juce::var (new juce::DynamicObject());
+    auto* o = root.getDynamicObject();
+    o->setProperty (keyFormatVersion, formatVersion);
+    o->setProperty (key, value);
+    return writeJson (root);
+}
 } // namespace mm
