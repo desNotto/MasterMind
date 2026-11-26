@@ -32,11 +32,11 @@ struct Context
     int spectrumMode = 0;    // 0 real time, 1 average, 2 peak hold
     bool delta = false;      // spectrum delta view
     int selectedEqBand = 5;  // 1..10
-    int selectedModule = 1;  // module card with the orange outline
+    int selectedModule = 2;  // module shown in the Master editor (0 Input ... 9 Output), Multiband first
+    bool eqSnap = false;     // EQ points snap to notes (mockup v8)
 
     /** Navigation (set by the editor). */
     std::function<void (const juce::String&)> showTab;
-    std::function<void (const juce::String& moduleKey)> showModuleDetail;
     std::function<void (const juce::String& message)> notify;
 
     const analysis::TapView& out() const { return snap.out; }

@@ -1,6 +1,9 @@
 #include "ui/EyesView.h"
 #include "ui/Locale.h"
 
+#include "dsp/DynamicEq.h"
+#include "state/Parameters.h"
+
 namespace mm::ui
 {
 namespace
@@ -101,7 +104,43 @@ void drawCorrelation (juce::Graphics& g, juce::Rectangle<float> r, double corr)
 }
 
 // ---- Tonal --------------------------------------------------------------------------------------------
-TonalPanel::TonalPanel (Context& c) : ctx (c)
+juce::String tonalEqStep (const Context& c, int band, double dev)
+{
+    const double lo = analysis::tonalEdges[band], hi = analysis::tonalEdges[band + 1];
+    int best = 0;
+    float bestGain = 0.0f;
+    for (int b = 1; b <= 10; ++b)
+    {
+        if (c.param (params::eq (b, "on")) < 0.5f || c.param ("eq_on") < 0.5f)
+            continue;
+        const auto kind = dsp::DynamicEq::kindOf (b - 1, juce::roundToInt (c.param (params::eq (b, "type"))));
+        if (kind == dsp::EqKind::lowCut || kind == dsp::EqKind::highCut || kind == dsp::EqKind::notch)
+            continue;
+        const float f = c.param (params::eq (b, "freq")), gdb = c.param (params::eq (b, "gain"));
+        if (f < lo || f >= hi || std::abs (gdb) < 0.05f || (dev < 0.0) != (gdb < 0.0f))
+            continue;
+        if (std::abs (gdb) > std::abs (bestGain))
+        {
+            best = b;
+            bestGain = gdb;
+        }
+    }
+    if (best == 0)
+        return {};
+    const float f = c.param (params::eq (best, "freq"));
+    const auto hz = f >= 1000.0f ? juce::String (f / 1000.0f, 2) + " kHz" : juce::String (juce::roundToInt (f)) + " Hz";
+    return (dev < 0.0 ? juce::String (juce::CharPointer_UTF8 ("Dynamic EQ \xd1\x83\xd0\xbc\xd0\xb5\xd0\xbd\xd1\x8c\xd1\x88\xd0\xb0\xd0\xb5\xd1\x82 \xd1\x8d\xd1\x82\xd0\xbe\xd1\x82 \xd0\xb4\xd0\xb8\xd0\xb0\xd0\xbf\xd0\xb0\xd0\xb7\xd0\xbe\xd0\xbd: \xd0\xbf\xd0\xbe\xd0\xbb\xd0\xbe\xd1\x81\xd0\xb0 ")) : juce::String (juce::CharPointer_UTF8 ("Dynamic EQ \xd0\xbf\xd0\xbe\xd0\xb4\xd0\xbd\xd0\xb8\xd0\xbc\xd0\xb0\xd0\xb5\xd1\x82 \xd1\x8d\xd1\x82\xd0\xbe\xd1\x82 \xd0\xb4\xd0\xb8\xd0\xb0\xd0\xbf\xd0\xb0\xd0\xb7\xd0\xbe\xd0\xbd: \xd0\xbf\xd0\xbe\xd0\xbb\xd0\xbe\xd1\x81\xd0\xb0 "))) + juce::String (best) + ", " + hz + ", " + fmtSigned (bestGain) + " dB. "
+           + (dev < 0.0 ? juce::String (juce::CharPointer_UTF8 ("\xd0\xa1\xd0\xb4\xd0\xb5\xd0\xbb\xd0\xb0\xd0\xb9\xd1\x82\xd0\xb5 \xd1\x81\xd1\x80\xd0\xb5\xd0\xb7 \xd0\xbc\xd0\xb5\xd0\xbd\xd1\x8c\xd1\x88\xd0\xb5.")) : juce::String (juce::CharPointer_UTF8 ("\xd0\xa1\xd0\xb4\xd0\xb5\xd0\xbb\xd0\xb0\xd0\xb9\xd1\x82\xd0\xb5 \xd0\xbf\xd0\xbe\xd0\xb4\xd1\x8a\xd1\x91\xd0\xbc \xd0\xbc\xd0\xb5\xd0\xbd\xd1\x8c\xd1\x88\xd0\xb5.")));
+}
+
+juce::String tonalTip (const Context& c, int band, int kind, double dev, double corridor)
+{
+    if (kind != 1 && kind != 2)
+        return {};
+    return tonalAdviceTip (band, dev, corridor, tonalEqStep (c, band, dev));
+}
+
+TonalPanel::TonalPanel (Context& c, bool comp) : ctx (c), compact (comp)
 {
     addAndMakeVisible (basis);
     addAndMakeVisible (target);
@@ -123,40 +162,48 @@ TonalPanel::TonalPanel (Context& c) : ctx (c)
 void TonalPanel::resized()
 {
     auto head = getLocalBounds().removeFromTop (32).reduced (8, 4);
-    target.setBounds (head.removeFromRight (164));
+    target.setBounds (head.removeFromRight (compact ? 112 : 164));
     head.removeFromRight (6);
-    basis.setBounds (head.removeFromRight (156));
-    rowsArea = getLocalBounds().withTrimmedTop (32).reduced (12, 6);
+    basis.setBounds (head.removeFromRight (compact ? 122 : 156));
+    rowsArea = getLocalBounds().withTrimmedTop (32).reduced (compact ? 10 : 12, compact ? 4 : 6);
 }
 
 void TonalPanel::paint (juce::Graphics& g)
 {
     drawPanel (g, getLocalBounds().toFloat());
-    paintPanelHeader (g, getLocalBounds(), tr ("Tonal balance"), tr ("vs target"), 336);
-    basis.setOptions ({ tr ("Integrated##tonal"), tr ("Last 10 s") });
-    target.setButtonText (tr ("Target: ") + ctx.snap.targets.name);
+    paintPanelHeader (g, getLocalBounds(), tr ("Tonal balance"), compact ? juce::String() : tr ("vs target"), compact ? 250 : 336);
+    basis.setOptions ({ tr ("Integrated##tonal"), compact ? tr ("10 s") : tr ("Last 10 s") });
+    if (compact)
+    {
+        const int n = ctx.refs.target().count;
+        target.setButtonText (n > 0 ? tr ("Ref set") + " (" + juce::String (n) + ")" : tr ("Default"));
+    }
+    else
+        target.setButtonText (tr ("Target: ") + ctx.snap.targets.name);
     const auto& t = viewTap (ctx);
     const auto& tonal = basis.getSelected() == 1 ? t.tonalRecent : t.tonalIntegrated;
     const auto& tg = ctx.snap.targets;
 
     auto r = rowsArea;
-    auto scale = r.removeFromTop (18);
-    const int nameW = 76, valW = 66, lightW = 24;
+    auto scale = compact ? r.withHeight (0) : r.removeFromTop (18);
+    const int nameW = compact ? 70 : 76, valW = compact ? 62 : 66, lightW = compact ? 22 : 24;
     auto track = scale.withTrimmedLeft (nameW).withTrimmedRight (valW + lightW);
     const double range = 6.0;
     const auto xOf = [&] (double v) { return track.getX() + (float) ((v + range) / (2 * range)) * track.getWidth(); };
     g.setFont (font (12.0f));
     g.setColour (col::text3);
     for (double v : { -6.0, -3.0, 0.0, 3.0, 6.0 })
-        g.drawText (v == 0 ? juce::String ("target") : fmtSigned (v, 0) + (std::abs (v) == 6 ? " dB" : ""), juce::Rectangle<float> (xOf (v) - 30, (float) scale.getY(), 60, 16), juce::Justification::centred);
+        if (! compact)
+            g.drawText (v == 0 ? juce::String ("target") : fmtSigned (v, 0) + (std::abs (v) == 6 ? " dB" : ""), juce::Rectangle<float> (xOf (v) - 30, (float) scale.getY(), 60, 16), juce::Justification::centred);
 
-    const int rowH = std::max (22, (r.getHeight() - 34) / analysis::numTonalBands);
+    const int rowH = compact ? std::max (22, r.getHeight() / analysis::numTonalBands) : std::max (22, (r.getHeight() - 34) / analysis::numTonalBands);
     juce::StringArray sentence;
     for (int b = 0; b < analysis::numTonalBands; ++b)
     {
         auto row = r.removeFromTop (rowH);
         const double dev = t.hasSignal ? tonal[(size_t) b] - tg.tonal[(size_t) b] : 0.0;
         const int kind = ! t.hasSignal ? 3 : (std::abs (dev) <= 1.0 ? 0 : (std::abs (dev) <= 2.5 ? 1 : 2));
+        rows[(size_t) b] = { row, kind, dev, tg.corridor[(size_t) b] };
         const auto c = lightColour (kind);
         auto name = row.removeFromLeft (nameW);
         g.setColour (col::text);
@@ -168,7 +215,8 @@ void TonalPanel::paint (juce::Graphics& g)
 
         auto lightR = row.removeFromRight (lightW);
         auto valR = row.removeFromRight (valW);
-        const auto tr = juce::Rectangle<float> ((float) track.getX(), row.getCentreY() - 10.0f, (float) track.getWidth(), 20.0f);
+        const float th = compact ? 18.0f : 20.0f;
+        const auto tr = juce::Rectangle<float> ((float) track.getX(), row.getCentreY() - th / 2, (float) track.getWidth(), th);
         g.setColour (col::sunk);
         g.fillRoundedRectangle (tr, 4.0f);
         g.setColour (col::line);
@@ -187,12 +235,14 @@ void TonalPanel::paint (juce::Graphics& g)
             g.fillRoundedRectangle (xOf (juce::jlimit (-range, range, dev)) - 2, tr.getY() + 3, 4.0f, tr.getHeight() - 6, 2.0f);
         }
         g.setColour (c);
-        g.setFont (font (14.0f, true));
+        g.setFont (font (compact ? 13.0f : 14.0f, true));
         g.drawText (t.hasSignal ? fmtSigned (dev) + " dB" : juce::String (juce::CharPointer_UTF8 ("\xe2\x80\x93")), valR, juce::Justification::centredRight);
         drawLight (g, lightR.toFloat().withSizeKeepingCentre (17, 17).translated (4, 0), kind);
         if (t.hasSignal && std::abs (dev) > 1.0)
             sentence.add (analysis::tonalLabel (b, dev));
     }
+    if (compact)
+        return;
     r.removeFromTop (6);
     auto sbox = r.removeFromTop (30).toFloat();
     g.setColour (col::panel2);
@@ -205,12 +255,14 @@ void TonalPanel::paint (juce::Graphics& g)
 
 void TonalPanel::mouseMove (const juce::MouseEvent& e)
 {
-    const int rowH = std::max (22, (rowsArea.getHeight() - 52) / analysis::numTonalBands);
-    const int b = (e.y - rowsArea.getY() - 18) / std::max (1, rowH);
-    if (b >= 0 && b < analysis::numTonalBands && b < (int) ctx.snap.checks.size())
-        setTip (*this, "t:" + ctx.snap.checks[(size_t) b].tooltip);
-    else
-        setTip (*this, {});
+    for (int b = 0; b < analysis::numTonalBands; ++b)
+        if (rows[(size_t) b].area.contains (e.getPosition()))
+        {
+            const auto& row = rows[(size_t) b];
+            setTip (*this, tonalTip (ctx, b, row.kind, row.dev, row.corridor));
+            return;
+        }
+    setTip (*this, {});
 }
 
 // ---- Loudness ------------------------------------------------------------------------------------------
@@ -341,19 +393,22 @@ void LoudnessPanel::paint (juce::Graphics& g)
 }
 
 // ---- Checks --------------------------------------------------------------------------------------------
-ChecksPanel::ChecksPanel (Context& c, bool comp) : ctx (c), compact (comp) {}
+ChecksPanel::ChecksPanel (Context& c, bool comp, bool skip) : ctx (c), compact (comp), skipTonal (skip) {}
 
 void ChecksPanel::paint (juce::Graphics& g)
 {
     drawPanel (g, getLocalBounds().toFloat());
-    paintPanelHeader (g, getLocalBounds(), tr ("Checks"), compact ? juce::String() : tr ("independent checks, hover for advice"));
+    paintPanelHeader (g, getLocalBounds(), tr ("Checks"), compact ? juce::String() : (skipTonal ? tr ("hover for advice") : tr ("independent checks, hover for advice")));
     listArea = getLocalBounds().withTrimmedTop (34).reduced (6, 2);
     const auto& checks = ctx.snap.checks;
-    if (checks.empty())
+    const size_t first = skipTonal ? (size_t) analysis::numTonalBands : 0;
+    if (checks.size() <= first)
         return;
-    const int rowH = std::max (compact ? 18 : 30, listArea.getHeight() / (int) checks.size());
+    // without room for the detail line the rows show one line (small windows)
+    const bool details = ! compact && listArea.getHeight() / (int) (checks.size() - first) >= 30;
+    const int rowH = std::max (details ? 30 : 18, listArea.getHeight() / (int) (checks.size() - first));
     auto r = listArea;
-    for (size_t i = 0; i < checks.size(); ++i)
+    for (size_t i = first; i < checks.size(); ++i)
     {
         const auto& c = checks[i];
         auto row = r.removeFromTop (rowH);
@@ -363,22 +418,22 @@ void ChecksPanel::paint (juce::Graphics& g)
             g.setColour (juce::Colour (0xff2a1f25));
             g.fillRoundedRectangle (row.toFloat(), 6.0f);
         }
-        if (! compact && i + 1 < checks.size())
+        if (details && i + 1 < checks.size())
         {
             g.setColour (col::line);
             g.drawHorizontalLine (row.getBottom() - 1, (float) row.getX() + 4, (float) row.getRight() - 4);
         }
         auto in = row.reduced (6, 1);
-        drawLight (g, in.removeFromLeft (compact ? 16 : 20).toFloat().withSizeKeepingCentre (compact ? 15.0f : 18.0f, compact ? 15.0f : 18.0f).withY ((float) in.getY() + (compact ? 1.0f : 4.0f)), kind);
+        drawLight (g, in.removeFromLeft (details ? 20 : 16).toFloat().withSizeKeepingCentre (details ? 18.0f : 15.0f, details ? 18.0f : 15.0f).withY ((float) in.getY() + (details ? 4.0f : 1.0f)), kind);
         in.removeFromLeft (8);
         g.setColour (lightColour (kind));
         g.setFont (font (13.0f, true));
-        auto top = compact ? in : in.removeFromTop (in.getHeight() / 2 + 1);
+        auto top = details ? in.removeFromTop (in.getHeight() / 2 + 1) : in;
         g.drawText (c.value, top, juce::Justification::centredRight);
         g.setColour (col::text);
         g.setFont (semibold (13.0f));
         g.drawText (tr (c.title + "##check"), top, juce::Justification::centredLeft);
-        if (! compact)
+        if (details)
         {
             g.setColour (col::text2);
             g.setFont (font (12.0f));
@@ -390,13 +445,27 @@ void ChecksPanel::paint (juce::Graphics& g)
 void ChecksPanel::mouseMove (const juce::MouseEvent& e)
 {
     const auto& checks = ctx.snap.checks;
-    const int rowH = checks.empty() ? 1 : std::max (compact ? 18 : 30, listArea.getHeight() / (int) checks.size());
-    const int i = (e.y - listArea.getY()) / rowH;
-    const int h = (i >= 0 && i < (int) checks.size() && listArea.contains (e.getPosition())) ? i : -1;
+    const int first = skipTonal ? analysis::numTonalBands : 0;
+    const int count = (int) checks.size() - first;
+    const bool details = ! compact && count > 0 && listArea.getHeight() / count >= 30;
+    const int rowH = count <= 0 ? 1 : std::max (details ? 30 : 18, listArea.getHeight() / count);
+    const int i = (e.y - listArea.getY()) / rowH + first;
+    const int h = (i >= first && i < (int) checks.size() && listArea.contains (e.getPosition())) ? i : -1;
     if (h != hover)
     {
         hover = h;
-        setTip (*this, h >= 0 ? "t:" + checks[(size_t) h].title + " " + checks[(size_t) h].value + "\n" + checks[(size_t) h].tooltip : juce::String());
+        juce::String tip;
+        if (h >= 0 && h < analysis::numTonalBands)
+        {
+            // tonal rows: the same advice as the tonal balance panel (mockup v7)
+            const auto& t = viewTap (ctx);
+            const double dev = t.tonalIntegrated[(size_t) h] - ctx.snap.targets.tonal[(size_t) h];
+            const int kind = lightKind (checks[(size_t) h].light);
+            tip = tonalTip (ctx, h, kind, dev, ctx.snap.targets.corridor[(size_t) h]);
+        }
+        else if (h >= 0)
+            tip = "t:" + checks[(size_t) h].title + " " + checks[(size_t) h].value + "\n" + checks[(size_t) h].tooltip;
+        setTip (*this, tip);
         repaint();
     }
 }

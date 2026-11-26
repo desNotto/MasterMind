@@ -1,5 +1,6 @@
 #include "ui/Widgets.h"
 
+#include "analysis/Checks.h"
 #include "state/Parameters.h"
 #include "ui/TooltipText.h"
 
@@ -183,7 +184,29 @@ void Knob::setNorm (float v)
 
 void Knob::resized()
 {
-    valueArea = getLocalBounds().withTrimmedTop (34).removeFromTop (16);
+    valueArea = getLocalBounds().withTrimmedTop ((int) dial + 2).removeFromTop (16);
+}
+
+void Knob::updateMeter()
+{
+    if (! meterLevel || param == nullptr)
+        return;
+    const float v = meterLevel();
+    const auto range = param->getNormalisableRange();
+    float next = shownLevel;
+    if (std::isnan (v))
+        next = std::numeric_limits<float>::quiet_NaN();
+    else
+    {
+        const float span = range.end - range.start;
+        const float clamped = juce::jlimit (range.start, range.end, v);
+        // fast rise, slow fall (about 20 % of the scale per second at 30 Hz)
+        next = std::isnan (shownLevel) || clamped > shownLevel || meterInverse ? clamped : std::max (clamped, shownLevel - span * 0.007f);
+    }
+    const bool changed = std::isnan (next) != std::isnan (shownLevel) || (! std::isnan (next) && std::abs (next - shownLevel) > 1.0e-4f);
+    shownLevel = next;
+    if (changed)
+        repaint();
 }
 
 void Knob::paint (juce::Graphics& g)
@@ -194,12 +217,47 @@ void Knob::paint (juce::Graphics& g)
         g.setColour (juce::Colour (0xff262b34));
         g.fillRoundedRectangle (b.reduced (1.0f), 6.0f);
     }
-    const float s = 32.0f;
-    const juce::Rectangle<float> dial (b.getCentreX() - s / 2, 2.0f, s, s);
-    const float cx = dial.getCentreX(), cy = dial.getCentreY(), r = s / 2 - 3;
+    const bool ring = hasRing();
+    // with a signal ring the dial is drawn smaller so that the ring fits the same footprint
+    const float s = ring ? dial - 5.0f : dial;
+    const float cx = b.getCentreX(), cy = 2.0f + dial / 2;
+    const float r = s / 2 - 3;
     const float v = valueNorm();
     const float a = juce::degreesToRadians (-135.0f + 270.0f * v);
     const float a0 = juce::degreesToRadians (-135.0f), a1 = juce::degreesToRadians (135.0f), aMid = 0.0f;
+
+    if (ring && param != nullptr)
+    {
+        // outer ring: the live signal on the threshold scale (green below, red above the threshold)
+        const float rr = r + 4.5f, mw = 2.5f;
+        juce::Path back;
+        back.addCentredArc (cx, cy, rr, rr, 0.0f, a0, a1, true);
+        g.setColour (juce::Colour (0xff20252d));
+        g.strokePath (back, juce::PathStrokeType (mw));
+        if (! std::isnan (shownLevel))
+        {
+            const float ln = param->convertTo0to1 (shownLevel);
+            const float la = juce::degreesToRadians (-135.0f + 270.0f * ln);
+            const auto seg = [&] (float from, float to, juce::Colour c)
+            {
+                if (to - from < 0.01f)
+                    return;
+                juce::Path p;
+                p.addCentredArc (cx, cy, rr, rr, 0.0f, from, to, true);
+                g.setColour (c);
+                g.strokePath (p, juce::PathStrokeType (mw));
+            };
+            if (meterInverse)
+                seg (a0, la, la < a ? col::bad : col::ok);
+            else
+            {
+                seg (a0, std::min (la, a), col::ok);
+                seg (a, la, col::bad);
+            }
+        }
+        g.setColour (juce::Colours::white);
+        g.drawLine (cx + (rr - mw / 2 - 1) * std::sin (a), cy - (rr - mw / 2 - 1) * std::cos (a), cx + (rr + mw / 2 + 1) * std::sin (a), cy - (rr + mw / 2 + 1) * std::cos (a), 1.5f);
+    }
 
     juce::Path track;
     track.addCentredArc (cx, cy, r, r, 0.0f, a0, a1, true);
@@ -225,17 +283,35 @@ void Knob::paint (juce::Graphics& g)
     const auto text = textOverride ? textOverride() : (param != nullptr ? param->getCurrentValueAsText() : juce::String());
     g.setFont (semibold (12.5f));
     g.setColour (col::text);
-    g.drawText (text, juce::Rectangle<float> (0, 35, b.getWidth(), 15), juce::Justification::centred, false);
+    g.drawText (text, juce::Rectangle<float> (0, dial + 3, b.getWidth(), 15), juce::Justification::centred, false);
     g.setFont (font (12.0f));
     g.setColour (col::text3);
-    g.drawText (label, juce::Rectangle<float> (0, 50, b.getWidth(), 14), juce::Justification::centred, false);
+    g.drawText (label, juce::Rectangle<float> (0, dial + 18, b.getWidth(), 14), juce::Justification::centred, false);
 }
 
 void Knob::mouseDown (const juce::MouseEvent& e)
 {
     if (e.mods.isPopupMenu())
     {
-        showEditor();
+        if (menuItems.empty())
+        {
+            showEditor();
+            return;
+        }
+        juce::PopupMenu m;
+        m.addItem (1, "Type a value...");
+        for (size_t i = 0; i < menuItems.size(); ++i)
+            m.addItem ((int) i + 2, menuItems[i].text, true, menuItems[i].ticked ? menuItems[i].ticked() : false);
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safe = juce::Component::SafePointer<Knob> (this)] (int r)
+        {
+            if (safe == nullptr || r <= 0)
+                return;
+            if (r == 1)
+                safe->showEditor();
+            else if (r - 2 < (int) safe->menuItems.size() && safe->menuItems[(size_t) r - 2].action)
+                safe->menuItems[(size_t) r - 2].action();
+            safe->repaint();
+        });
         return;
     }
     lastDrag = e.position;
@@ -475,10 +551,10 @@ void TipBubble::setContent (juce::String t, juce::String v, std::vector<Section>
     footer = std::move (f);
 }
 
-int TipBubble::contentHeight (int width) const
+int TipBubble::contentHeight (int w) const
 {
     int h = 10 + 18 + 4;
-    const int textW = width - 24 - 82;
+    const int textW = w - 24 - 82;
     for (const auto& s : sections)
     {
         juce::AttributedString as;
@@ -494,7 +570,7 @@ int TipBubble::contentHeight (int width) const
 
 void TipBubble::place (juce::Rectangle<int> target, juce::Rectangle<int> bounds)
 {
-    const int w = 356;
+    const int w = width;
     const int h = contentHeight (w);
     int x = juce::jlimit (bounds.getX() + 8, bounds.getRight() - w - 8, target.getCentreX() - w / 2);
     above = target.getY() - h - 12 >= bounds.getY() + 8;
@@ -553,9 +629,15 @@ void TipBubble::paint (juce::Graphics& g)
     }
 }
 
+juce::String tonalAdviceTip (int band, double dev, double corridor, const juce::String& eqStep)
+{
+    return "a:" + juce::String (band) + "|" + juce::String (dev, 2) + "|" + juce::String (corridor, 2) + "|" + eqStep;
+}
+
 void fillTip (TipBubble& bubble, const juce::String& tip, juce::Component* source, juce::AudioProcessorValueTreeState& state)
 {
     using namespace tips;
+    bubble.width = 356;
     const auto kind = tip.upToFirstOccurrenceOf (":", false, false);
     const auto key = tip.fromFirstOccurrenceOf (":", false, false);
     static const std::map<juce::String, juce::String> moduleOn { { "in", "in_on" }, { "eq", "eq_on" }, { "mb", "mb_on" }, { "le", "lem_on" },
@@ -588,6 +670,10 @@ void fillTip (TipBubble& bubble, const juce::String& tip, juce::Component* sourc
                     s.push_back ({ u ("\xd0\xa1\xd1\x82\xd0\xb0\xd1\x82\xd1\x83\xd1\x81"), u ("\xd0\x9c\xd0\xbe\xd0\xb4\xd1\x83\xd0\xbb\xd1\x8c \xd0\xb2\xd1\x8b\xd0\xba\xd0\xbb\xd1\x8e\xd1\x87\xd0\xb5\xd0\xbd (Bypassed). \xd0\xa0\xd1\x83\xd1\x87\xd0\xba\xd0\xb0 \xd1\x81\xd0\xb5\xd0\xb9\xd1\x87\xd0\xb0\xd1\x81 \xd0\xbd\xd0\xb5 \xd0\xb8\xd0\xb7\xd0\xbc\xd0\xb5\xd0\xbd\xd1\x8f\xd0\xb5\xd1\x82 \xd0\xb7\xd0\xb2\xd1\x83\xd0\xba."), true });
                 s.push_back ({ u ("\xd0\x9c\xd0\xbe\xd0\xb4\xd1\x83\xd0\xbb\xd1\x8c"), modText, false });
                 s.push_back ({ u ("\xd0\xa0\xd1\x83\xd1\x87\xd0\xba\xd0\xb0"), u (k.text), false });
+                if (auto* knob = dynamic_cast<Knob*> (source); knob != nullptr && knob->hasRing())
+                    for (const auto& c : controls())
+                        if (juce::String (c.id) == (knob->meterInverse ? "thr.ring.inv" : "thr.ring"))
+                            s.push_back ({ u ("\xd0\x98\xd0\xbd\xd0\xb4\xd0\xb8\xd0\xba\xd0\xb0\xd1\x82\xd0\xbe\xd1\x80"), u (c.text), false });
                 s.push_back ({ u (k.kind), u (k.tip), u (k.kind) == warning });
                 bubble.setContent (modName + " \xc2\xb7 " + u (k.label), u (k.range), s,
                                    u ("\xd0\x94\xd0\xb2\xd0\xbe\xd0\xb9\xd0\xbd\xd0\xbe\xd0\xb9 \xd0\xba\xd0\xbb\xd0\xb8\xd0\xba \xe2\x80\x94 \xd1\x81\xd0\xb1\xd1\x80\xd0\xbe\xd1\x81 \xc2\xb7 Shift \xe2\x80\x94 \xd1\x82\xd0\xbe\xd1\x87\xd0\xbd\xd0\xbe"));
@@ -614,6 +700,30 @@ void fillTip (TipBubble& bubble, const juce::String& tip, juce::Component* sourc
         s.push_back ({ advice, u ("\xd0\x97\xd0\xb5\xd0\xbb\xd1\x91\xd0\xbd\xd0\xb0\xd1\x8f \xd1\x82\xd0\xbe\xd1\x87\xd0\xba\xd0\xb0 \xd0\xbf\xd0\xbe\xd0\xba\xd0\xb0\xd0\xb7\xd1\x8b\xd0\xb2\xd0\xb0\xd0\xb5\xd1\x82, \xd1\x87\xd1\x82\xd0\xbe \xd0\xbc\xd0\xbe\xd0\xb4\xd1\x83\xd0\xbb\xd1\x8c \xd0\xb2\xd0\xba\xd0\xbb\xd1\x8e\xd1\x87\xd1\x91\xd0\xbd. \xd0\x9a\xd0\xbb\xd0\xb8\xd0\xba \xd0\xbf\xd0\xbe \xd1\x82\xd0\xbe\xd1\x87\xd0\xba\xd0\xb5 \xd0\xb2\xd0\xba\xd0\xbb\xd1\x8e\xd1\x87\xd0\xb0\xd0\xb5\xd1\x82 \xd0\xb8 \xd0\xb2\xd1\x8b\xd0\xba\xd0\xbb\xd1\x8e\xd1\x87\xd0\xb0\xd0\xb5\xd1\x82 \xd0\xbc\xd0\xbe\xd0\xb4\xd1\x83\xd0\xbb\xd1\x8c. \xd0\xa1\xd1\x80\xd0\xb0\xd0\xb2\xd0\xbd\xd0\xb8\xd0\xb2\xd0\xb0\xd0\xb9\xd1\x82\xd0\xb5 \xd0\xb7\xd0\xb2\xd1\x83\xd0\xba \xd0\xbd\xd0\xb0 \xd0\xbe\xd0\xb4\xd0\xbd\xd0\xbe\xd0\xbc \xd0\xb8 \xd1\x82\xd0\xbe\xd0\xbc \xd0\xb6\xd0\xb5 \xd0\xbc\xd0\xb5\xd1\x81\xd1\x82\xd0\xb5 \xd0\xbf\xd0\xb5\xd1\x81\xd0\xbd\xd0\xb8."), false });
         bubble.setContent (modName, off ? juce::String ("off") : juce::String ("on"), s,
                            u ("\xd0\x9a\xd0\xbb\xd0\xb8\xd0\xba \xd0\xbf\xd0\xbe \xd1\x82\xd0\xbe\xd1\x87\xd0\xba\xd0\xb5 \xe2\x80\x94 \xd0\xb2\xd0\xba\xd0\xbb/\xd0\xb2\xd1\x8b\xd0\xba\xd0\xbb \xc2\xb7 \xd0\x94\xd0\xb2\xd0\xbe\xd0\xb9\xd0\xbd\xd0\xbe\xd0\xb9 \xd0\xba\xd0\xbb\xd0\xb8\xd0\xba \xd0\xbf\xd0\xbe \xd0\xb8\xd0\xbc\xd0\xb5\xd0\xbd\xd0\xb8 \xe2\x80\x94 \xd0\xb2\xd1\x81\xd0\xb5 \xd0\xbf\xd0\xb0\xd1\x80\xd0\xb0\xd0\xbc\xd0\xb5\xd1\x82\xd1\x80\xd1\x8b"));
+        return;
+    }
+    if (kind == "a")
+    {
+        // tonal balance advice (mockup v7)
+        const auto parts = juce::StringArray::fromTokens (key, "|", "");
+        const int b = juce::jlimit (0, analysis::numTonalBands - 1, parts[0].getIntValue());
+        const double dev = parts[1].getDoubleValue(), cor = parts[2].getDoubleValue();
+        const auto& adv = tonalAdvice()[(size_t) b];
+        const bool up = dev > 0.0;
+        const bool bad = std::abs (dev) > 2.5;
+        juce::StringArray steps;
+        if (parts[3].isNotEmpty())
+            steps.add (parts[3]);
+        for (const auto* st : up ? adv.upSteps : adv.dnSteps)
+            if (steps.size() < 3)
+                steps.add (u (st));
+        juce::String list;
+        for (int i = 0; i < steps.size(); ++i)
+            list << (i > 0 ? "\n" : "") << juce::String (i + 1) << ". " << steps[i];
+        const auto status = (up ? u ("\xd0\x92\xd1\x8b\xd1\x88\xd0\xb5 \xd1\x86\xd0\xb5\xd0\xbb\xd0\xb8 \xd0\xbd\xd0\xb0 ") : u ("\xd0\x9d\xd0\xb8\xd0\xb6\xd0\xb5 \xd1\x86\xd0\xb5\xd0\xbb\xd0\xb8 \xd0\xbd\xd0\xb0 ")) + juce::String (std::abs (dev), 1) + u (" dB. \xd0\x9d\xd0\xbe\xd1\x80\xd0\xbc\xd0\xb0: \xc2\xb1") + juce::String (cor, 1) + " dB.";
+        std::vector<TipBubble::Section> s { { u ("\xd0\xa1\xd1\x82\xd0\xb0\xd1\x82\xd1\x83\xd1\x81"), status, bad }, { u ("\xd0\xa1\xd0\xbb\xd1\x8b\xd1\x88\xd0\xbd\xd0\xbe"), u (up ? adv.upHeard : adv.dnHeard), false }, { u ("\xd0\x98\xd1\x81\xd0\xbf\xd1\x80\xd0\xb0\xd0\xb2\xd1\x8c\xd1\x82\xd0\xb5"), list, false } };
+        bubble.width = 410;
+        bubble.setContent (juce::String (analysis::tonalBandName (b)) + u (" \xc2\xb7 ") + u (analysis::tonalBandRange (b)), fmtSigned (dev) + " dB", s, u ("\xd0\x9c\xd0\xb5\xd0\xbd\xd1\x8f\xd0\xb9\xd1\x82\xd0\xb5 \xd0\xbd\xd0\xb0 1 dB \xd0\xb7\xd0\xb0 \xd1\x88\xd0\xb0\xd0\xb3. \xd0\x9d\xd1\x83\xd0\xb6\xd0\xbd\xd0\xbe \xd0\xb1\xd0\xbe\xd0\xbb\xd1\x8c\xd1\x88\xd0\xb5 3 dB \xe2\x80\x94 \xd0\xb8\xd1\x81\xd0\xbf\xd1\x80\xd0\xb0\xd0\xb2\xd1\x8c\xd1\x82\xd0\xb5 \xd0\xbc\xd0\xb8\xd0\xba\xd1\x81."));
         return;
     }
     if (kind == "c")

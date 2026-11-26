@@ -35,9 +35,19 @@ struct ControlText
     const char* gesture;
 };
 
+/** Advice for a tonal balance band above (up) or below (dn) the target (mockup v7). */
+struct TonalAdvice
+{
+    const char* upHeard;
+    std::vector<const char*> upSteps;
+    const char* dnHeard;
+    std::vector<const char*> dnSteps;
+};
+
 const std::vector<ModuleText>& modules();
 const std::vector<KnobText>& knobs();
 const std::vector<ControlText>& controls();
+const std::vector<TonalAdvice>& tonalAdvice();
 
 inline juce::String u (const char* s) { return juce::String (juce::CharPointer_UTF8 (s)); }
 } // namespace mm::ui::tips

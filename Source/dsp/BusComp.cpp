@@ -57,6 +57,7 @@ void BusComp::process (float* left, float* right, int numSamples) noexcept
     const double link = settings.link;
 
     float maxGr = 0.0f;
+    double maxLevel = -100.0;
     float* io[2] = { left, right };
     for (int start = 0; start < numSamples; start += controlBlock)
     {
@@ -77,6 +78,7 @@ void BusComp::process (float* left, float* right, int numSamples) noexcept
                 lvl[ch] = det[(size_t) ch].process (sc[(size_t) ch].process (src), settings.rmsAmount);
             }
             const double linked = std::max (lvl[0], lvl[1]);
+            maxLevel = std::max (maxLevel, linked);
             const double mk = makeup.next(), mx = mix.next();
             double grMin = 0.0;
             for (int ch = 0; ch < 2; ++ch)
@@ -94,5 +96,6 @@ void BusComp::process (float* left, float* right, int numSamples) noexcept
         }
     }
     grMeter.set (maxGr);
+    levelMeter.set ((float) maxLevel);
 }
 } // namespace mm::dsp

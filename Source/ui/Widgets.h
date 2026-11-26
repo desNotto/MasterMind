@@ -5,6 +5,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <functional>
+#include <limits>
 #include <memory>
 
 namespace mm::ui
@@ -57,6 +58,27 @@ public:
     /** Called after the user changed the value (not on automation). */
     std::function<void()> onUserChange;
 
+    /** Signal ring (mockup v6): returns the live level in the parameter's own units (dB, or the
+        correlation for the guard), or NaN for "no signal". Inverse: the module acts below the
+        threshold (correlation guard). Call updateMeter() from the owner's timer. */
+    std::function<float()> meterLevel;
+    bool meterInverse = false;
+    void updateMeter();
+    bool hasRing() const noexcept { return (bool) meterLevel; }
+
+    /** Dial diameter (32 by default; the saturation Drive knob is larger). */
+    void setDialSize (float px) { dial = px; repaint(); }
+    float preferredHeight() const noexcept { return dial + 32.0f; }
+
+    /** Extra right-click menu items (e.g. "Auto release"); the value editor stays the first item. */
+    struct MenuItem
+    {
+        juce::String text;
+        std::function<bool()> ticked;
+        std::function<void()> action;
+    };
+    std::vector<MenuItem> menuItems;
+
 private:
     void showEditor();
     float valueNorm() const;
@@ -72,6 +94,7 @@ private:
     std::unique_ptr<juce::ParameterAttachment> attachment;
     std::unique_ptr<juce::TextEditor> editor;
     juce::Rectangle<int> valueArea;
+    float dial = 32.0f, shownLevel = std::numeric_limits<float>::quiet_NaN();
 };
 
 /** Text button styled like the mockup ("btn", "btn tog on"). Optional parameter attachment. */
@@ -154,14 +177,19 @@ public:
     /** Layout for a target rectangle inside `bounds` (above, or below if no room). */
     void place (juce::Rectangle<int> target, juce::Rectangle<int> bounds);
     void paint (juce::Graphics&) override;
+    int width = 356; // 410 for the tonal balance advice (mockup v7)
 
 private:
     juce::String title, values, footer;
     std::vector<Section> sections;
     bool above = true;
     int arrowX = 0;
-    int contentHeight (int width) const;
+    int contentHeight (int w) const;
 };
+
+/** Tooltip property for a tonal balance row (mockup v7): band 0..5, deviation and corridor in dB,
+    and an optional first step built from the current Dynamic EQ. */
+juce::String tonalAdviceTip (int band, double deviationDb, double corridorDb, const juce::String& eqStep);
 
 /** Resolves a tooltip property string into a bubble (uses the approved texts). */
 void fillTip (TipBubble& bubble, const juce::String& tip, juce::Component* source, juce::AudioProcessorValueTreeState& state);

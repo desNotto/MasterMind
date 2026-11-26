@@ -25,6 +25,8 @@ public:
     void process (float* left, float* right, int numSamples) noexcept override;
 
     float gainReductionDb() const noexcept { return grMeter.get(); }
+    /** Highest detector level of the last block in dB (the level the threshold acts on). */
+    float detectorLevelDb() const noexcept { return levelMeter.get(); }
 
     /** Static curve output level for an input level (dB), for the UI transfer graph. */
     static double staticCurveDb (const Settings& s, double inDb);
@@ -38,6 +40,6 @@ private:
     std::array<double, 2> fbOut {};
     FreqRamp scFreq;
     Ramp mix, makeup;
-    Meter grMeter;
+    Meter grMeter, levelMeter;
 };
 } // namespace mm::dsp

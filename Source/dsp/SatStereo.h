@@ -32,6 +32,9 @@ public:
 
     static double shape (int type, double x, double bias) noexcept;
 
+    /** Peak of the band signal (linear, before the drive) in the last block, for the transfer curve. */
+    float bandPeak (int band) const noexcept { return peakMeters[(size_t) band].get(); }
+
 private:
     void updateSplit (double osRate) noexcept;
 
@@ -51,6 +54,7 @@ private:
         Ramp drive, mix, out, bias;
     };
     std::array<BandRamp, 3> ramps;
+    std::array<Meter, 3> peakMeters;
 };
 
 /** 4.7 Width per band, mid/side balance and the correlation guard. */
@@ -73,6 +77,8 @@ public:
 
     /** Width reduction applied by the guard per band (0..1, 1 = no reduction), for the meter. */
     float guardFactor (int band) const noexcept { return guardMeters[(size_t) band].get(); }
+    /** Lowest correlation of the guarded bands (mid, high); above 1 when the guard is off. */
+    float guardCorrelation() const noexcept { return corrMeter.get(); }
 
 private:
     void updateSplits (double lo, double hi) noexcept;
@@ -90,5 +96,6 @@ private:
     std::array<double, 3> guard { 1.0, 1.0, 1.0 };
     double corrCoeff = 0.0, guardCoeff = 0.0;
     std::array<Meter, 3> guardMeters;
+    Meter corrMeter;
 };
 } // namespace mm::dsp

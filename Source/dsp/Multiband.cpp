@@ -219,11 +219,13 @@ void Multiband::compressBands (int len) noexcept
         if (s.bypass)
         {
             grMeters[(size_t) b].set (0.0f);
+            levelMeters[(size_t) b].set (-100.0f);
             continue;
         }
 
         const bool ms = s.mode == 1;
         float maxGr = 0.0f;
+        double maxLevel = -100.0;
         for (int i = 0; i < len; ++i)
         {
             double a = x0[i], c = x1[i];
@@ -235,6 +237,7 @@ void Multiband::compressBands (int len) noexcept
             }
             const double la = gainToDb (std::abs (a) + 1.0e-9), lc = gainToDb (std::abs (c) + 1.0e-9);
             const double linked = std::max (la, lc);
+            maxLevel = std::max (maxLevel, linked);
             const double link = ms ? 0.0 : s.link;
             const double ga = d.smooth[0].process (compressorGainDb (link * linked + (1.0 - link) * la, s.thresholdDb, s.ratio, s.kneeDb));
             const double gc = d.smooth[1].process (compressorGainDb (link * linked + (1.0 - link) * lc, s.thresholdDb, s.ratio, s.kneeDb));
@@ -254,6 +257,7 @@ void Multiband::compressBands (int len) noexcept
             x1[i] = (float) (wc * tr);
         }
         grMeters[(size_t) b].set (maxGr);
+        levelMeters[(size_t) b].set ((float) maxLevel);
     }
 }
 

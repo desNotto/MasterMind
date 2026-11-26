@@ -5,7 +5,7 @@
 #include "state/WindowSizing.h"
 #include "ui/Context.h"
 #include "ui/EyesView.h"
-#include "ui/ModuleStrip.h"
+#include "ui/MasterView.h"
 #include "ui/OtherViews.h"
 #include "ui/SpectrumPanel.h"
 #include "ui/TopBar.h"
@@ -29,7 +29,7 @@ juce::Point<int> referenceSize (LayoutMode m);
 float layoutScale (int width, int height);
 } // namespace mm::ui
 
-/** The MasterMind window (approved mockup v4). Everything is drawn in reference units of the
+/** The MasterMind window (approved mockup v9). Everything is drawn in reference units of the
     current layout mode and scaled uniformly with the window. */
 class MasterMindEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
@@ -45,6 +45,7 @@ public:
     juce::Component& getRoot() noexcept;
     void showTab (const juce::String& name);
     void forceUpdate() { timerCallback(); }
+    void selectModule (int index);
     bool isCompactTab (const juce::String& t) const;
 
 private:
@@ -55,7 +56,6 @@ private:
     void timerCallback() override;
     void updateTooltip();
     void notify (const juce::String& message);
-    void showModuleDetail (const juce::String& key);
     void layoutContent();
 
     mm::window::Size currentSize() const noexcept { return { getWidth(), getHeight() }; }
@@ -68,16 +68,14 @@ private:
     std::unique_ptr<mm::ui::TopBar> topBar;
     std::unique_ptr<TabBar> tabBar;
     std::unique_ptr<Footer> footer;
-    std::unique_ptr<mm::ui::SpectrumPanel> spectrum, spectrumCompact;
-    std::unique_ptr<mm::ui::ModuleStrip> strip;
-    std::unique_ptr<juce::Viewport> stripViewport;
+    std::unique_ptr<mm::ui::SpectrumPanel> spectrumCompact;
+    std::unique_ptr<mm::ui::MasterView> master;
     std::unique_ptr<mm::ui::EyesView> eyes;
     std::unique_ptr<mm::ui::ChecksPanel> checksCompact;
     std::unique_ptr<mm::ui::LowEndView> lowEnd;
     std::unique_ptr<mm::ui::StereoView> stereo;
     std::unique_ptr<mm::ui::SpectrogramView> spectrogram;
     std::unique_ptr<mm::ui::AlbumView> albumView;
-    std::unique_ptr<mm::ui::ModuleDetail> detail;
     mm::ui::TipBubble bubble;
     juce::String currentTab = "Master";
     mm::ui::LayoutMode mode = mm::ui::LayoutMode::full;

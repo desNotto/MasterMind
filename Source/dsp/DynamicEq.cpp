@@ -107,6 +107,7 @@ void DynamicEq::reset()
             st.delta[(size_t) ch].reset();
         }
         meters[(size_t) b].set (band.gainDb);
+        levelMeters[(size_t) b].set (-100.0f);
     }
     for (auto& c : conv)
         c.reset();
@@ -159,6 +160,7 @@ void DynamicEq::runBands (float* left, float* right, int numSamples, bool deltaO
         {
             st.wasOn = false;
             meters[(size_t) b].set (band.gainDb);
+            levelMeters[(size_t) b].set (-100.0f);
             continue;
         }
         if (! st.wasOn)
@@ -206,9 +208,12 @@ void DynamicEq::runBands (float* left, float* right, int numSamples, bool deltaO
             if (dyn)
             {
                 const double level = gainToDb (st.env.value() + 1.0e-9);
+                levelMeters[(size_t) b].set ((float) level);
                 const double amount = std::clamp (level - band.thresholdDb, 0.0, (double) band.rangeDb);
                 gEff = band.mode == 0 ? g - amount : g + amount;
             }
+            else
+                levelMeters[(size_t) b].set (-100.0f);
             meters[(size_t) b].set ((float) (hasGain (kind) ? gEff : g));
 
             if (ramping || dyn || st.lastType != band.type || st.lastSlope != band.slope)

@@ -80,6 +80,7 @@ void Saturation::process (float* left, float* right, int numSamples) noexcept
         updateSplit (rate);
 
     const int n = (int) upBlock.getNumSamples();
+    double peaks[3] = { 0.0, 0.0, 0.0 };
     for (int b = 0; b < 3; ++b)
     {
         const auto& s = settings.bands[(size_t) b];
@@ -114,6 +115,7 @@ void Saturation::process (float* left, float* right, int numSamples) noexcept
             {
                 const int type = settings.bands[(size_t) b].type;
                 const double x = bands[b];
+                peaks[b] = std::max (peaks[b], std::abs (x));
                 // drive into the shaper, then divide by the drive so the level stays comparable
                 const double wet = shape (type, x * drive[b], bias[b]) / drive[b];
                 sum += (x + mixv[b] * (wet - x)) * out[b];
@@ -122,6 +124,8 @@ void Saturation::process (float* left, float* right, int numSamples) noexcept
         }
     }
     os.down (block);
+    for (int b = 0; b < 3; ++b)
+        peakMeters[(size_t) b].set ((float) peaks[b]);
 }
 
 // ---- Stereo ------------------------------------------------------------------------------------------
@@ -231,5 +235,13 @@ void StereoStage::process (float* left, float* right, int numSamples) noexcept
     }
     for (int b = 0; b < 3; ++b)
         guardMeters[(size_t) b].set ((float) guard[(size_t) b]);
+    double corrMin = 2.0;
+    if (settings.guardOn)
+        for (int b = 1; b < 3; ++b)
+        {
+            const double denom = std::sqrt (corrLL[(size_t) b] * corrRR[(size_t) b]);
+            corrMin = std::min (corrMin, denom > 1.0e-12 ? corrLR[(size_t) b] / denom : 1.0);
+        }
+    corrMeter.set ((float) corrMin);
 }
 } // namespace mm::dsp

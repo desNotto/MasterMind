@@ -28,6 +28,8 @@ public:
 
     /** Peak reduction of the last block in dB (<= 0) and per-sample reduction for the histogram. */
     float peakReductionDb() const noexcept { return prMeter.get(); }
+    /** Input peak of the last block in dBFS (oversampled, before clipping). */
+    float inputPeakDb() const noexcept { return inMeter.get(); }
 
     static double clip (int type, double x, double t, double shape) noexcept;
 
@@ -37,7 +39,7 @@ private:
     double lastRate = 0.0;
     std::array<Cascade, 2> lowProt;
     Ramp thr, mix;
-    Meter prMeter;
+    Meter prMeter, inMeter;
 };
 
 /** 4.9 True-peak-safe look-ahead limiter with a fast transient stage and a slower program stage. */

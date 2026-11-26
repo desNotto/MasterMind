@@ -1,4 +1,5 @@
 #include "ui/SpectrumPanel.h"
+#include "ui/EqControls.h"
 #include "ui/Locale.h"
 
 #include "dsp/DynamicEq.h"
@@ -287,15 +288,31 @@ public:
             g.strokePath (eq, juce::PathStrokeType (2.2f));
         }
         if (eqOn && ! compact)
+        {
+            // the selected band's own curve
+            const int sb = ctx.selectedEqBand - 1;
+            if (sb >= 0 && sb < 10 && eqSettings.bands[(size_t) sb].on)
+            {
+                juce::Path own;
+                const auto& band = eqSettings.bands[(size_t) sb];
+                for (int i = 0; i <= 240; ++i)
+                {
+                    const double f = fMin * std::pow (fMax / fMin, i / 240.0);
+                    const float y = juce::jlimit (p.getY() - 4, p.getBottom() + 4, yEq (dsp::DynamicEq::bandResponseDb (band, sb, ctx.snap.sampleRate > 0 ? ctx.snap.sampleRate : 48000.0, f, band.gainDb)));
+                    i == 0 ? own.startNewSubPath (xOf (f), y) : own.lineTo (xOf (f), y);
+                }
+                g.setColour (juce::Colours::white.withAlpha (0.35f));
+                g.strokePath (own, juce::PathStrokeType (1.2f));
+            }
             for (int b = 0; b < 10; ++b)
             {
-                const auto& band = eqSettings.bands[(size_t) b];
-                if (! band.on)
+                if (! eqedit::bandUsed (ctx, b + 1))
                     continue;
+                const auto& band = eqSettings.bands[(size_t) b];
                 const auto pos = nodePos (b);
                 const bool sel = ctx.selectedEqBand == b + 1;
                 const float r = sel ? 10.0f : 8.0f;
-                if (sel && band.dynamic)
+                if (sel && band.on && band.dynamic)
                 {
                     // dynamic range of the selected band (dashed)
                     juce::Path dr;
@@ -305,7 +322,7 @@ public:
                     for (int i = 0; i <= 120; ++i)
                     {
                         const double f = band.freq * std::pow (2.0, (i - 60) / 30.0);
-                        const float y = yEq (dsp::DynamicEq::bandResponseDb (alt, b, ctx.snap.sampleRate, f, alt.gainDb));
+                        const float y = yEq (dsp::DynamicEq::bandResponseDb (alt, b, ctx.snap.sampleRate > 0 ? ctx.snap.sampleRate : 48000.0, f, alt.gainDb));
                         i == 0 ? dr.startNewSubPath (xOf (f), y) : dr.lineTo (xOf (f), y);
                     }
                     juce::Path dashed;
@@ -314,34 +331,42 @@ public:
                     g.setColour (col::yellow.withAlpha (0.6f));
                     g.fillPath (dashed);
                 }
-                g.setColour (sel ? col::yellow : juce::Colour (0xff1b1d21));
-                g.fillEllipse (pos.x - r, pos.y - r, 2 * r, 2 * r);
-                g.setColour (col::yellow);
-                g.drawEllipse (pos.x - r, pos.y - r, 2 * r, 2 * r, 2.0f);
-                g.setColour (sel ? juce::Colour (0xff1b1600) : col::yellow);
-                g.setFont (font (12.0f, true));
-                g.drawText (juce::String (b + 1), juce::Rectangle<float> (pos.x - r, pos.y - r, 2 * r, 2 * r), juce::Justification::centred);
+                const auto ring = juce::Rectangle<float> (pos.x - r, pos.y - r, 2 * r, 2 * r);
                 if (sel)
                 {
-                    static const char* kinds[] = { "Bell", "Low shelf", "High shelf", "Notch", "Low cut", "High cut" };
-                    const auto kind = dsp::DynamicEq::kindOf (b, band.type);
-                    const auto line1 = "Band " + juce::String (b + 1) + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + kinds[(int) kind] + (band.dynamic ? juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 Dynamic")) : juce::String());
-                    static const char* places[] = { "Stereo", "Mid", "Side", "Left", "Right" };
-                    const auto line2 = hz (band.freq) + " " + fmtSigned (band.gainDb) + " dB Q " + juce::String (band.q, 1) + " " + places[juce::jlimit (0, 4, band.placement)];
-                    juce::Rectangle<float> box (pos.x - 80, pos.y + 16, 196, 40);
-                    box = box.constrainedWithin (p.reduced (4));
-                    g.setColour (juce::Colour (0xe0111317));
-                    g.fillRoundedRectangle (box, 6.0f);
-                    g.setColour (juce::Colour (0xff6b5d2a));
-                    g.drawRoundedRectangle (box, 6.0f, 1.0f);
-                    g.setColour (col::yellow);
-                    g.setFont (font (12.0f, true));
-                    g.drawText (line1, box.reduced (8, 4).removeFromTop (16), juce::Justification::left);
-                    g.setColour (col::text);
-                    g.setFont (font (12.0f));
-                    g.drawText (line2, box.reduced (8, 4).withTrimmedTop (16), juce::Justification::left);
+                    g.setColour (col::yellow.withAlpha (0.18f));
+                    g.fillEllipse (ring.expanded (5.0f));
                 }
+                const auto stroke = band.on ? col::yellow : juce::Colour (0xff7d7250);
+                g.setColour (sel && band.on ? col::yellow : juce::Colour (0xff1b1d21));
+                g.fillEllipse (ring);
+                g.setColour (stroke);
+                if (band.on)
+                    g.drawEllipse (ring, 2.0f);
+                else
+                {
+                    juce::Path circle, dashed;
+                    circle.addEllipse (ring);
+                    const float dashes[] = { 3.0f, 2.0f };
+                    juce::PathStrokeType (2.0f).createDashedStroke (dashed, circle, dashes, 2);
+                    g.fillPath (dashed);
+                }
+                g.setColour (sel && band.on ? juce::Colour (0xff1b1600) : stroke);
+                g.setFont (font (12.0f, true));
+                g.drawText (juce::String (b + 1), ring, juce::Justification::centred);
             }
+            g.setColour (col::text3);
+            g.setFont (font (11.5f));
+            g.drawText (tr ("Double-click: add a band") + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + tr ("at the edges: low cut / high cut"),
+                        p.reduced (8, 5), juce::Justification::bottomRight, true);
+        }
+        else if (! compact && ! eqOn)
+        {
+            g.setColour (col::text3);
+            g.setFont (font (11.5f));
+            g.drawText (tr ("Double-click: add a band") + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + tr ("at the edges: low cut / high cut"),
+                        p.reduced (8, 5), juce::Justification::bottomRight, true);
+        }
 
         // cursor readout with the nearest note for 20-500 Hz (spec 5.1)
         if (cursor.has_value() && p.contains (*cursor))
@@ -395,23 +420,23 @@ public:
     {
         const auto& band = eqSettings.bands[(size_t) b];
         const auto kind = dsp::DynamicEq::kindOf (b, band.type);
-        const double fs = ctx.snap.sampleRate > 0 ? ctx.snap.sampleRate : 48000.0;
         float y;
         if (kind == dsp::EqKind::bell)
-            y = yEq (dynGains[(size_t) b]);
+            y = yEq (band.on ? dynGains[(size_t) b] : band.gainDb);
         else if (kind == dsp::EqKind::lowShelf || kind == dsp::EqKind::highShelf)
-            y = yEq (dynGains[(size_t) b] * 0.5);
+            y = yEq ((band.on ? dynGains[(size_t) b] : band.gainDb) * 0.5);
         else
-            y = yEq (dsp::DynamicEq::bandResponseDb (band, b, fs, band.freq, band.gainDb));
-        return { xOf (band.freq), juce::jlimit (plotArea().getY() + 8, plotArea().getBottom() - 8, y) };
+            y = yEq (0.0); // cuts and notches sit on the 0 dB line (mockup v8)
+        const auto pa = plotArea();
+        return { juce::jlimit (pa.getX() + 9, pa.getRight() - 9, xOf (band.freq)), juce::jlimit (pa.getY() + 10, pa.getBottom() - 10, y) };
     }
 
     int nodeAt (juce::Point<float> pt) const
     {
-        if (ctx.param ("eq_on") < 0.5f)
+        if (compact)
             return -1;
         for (int b = 9; b >= 0; --b)
-            if (eqSettings.bands[(size_t) b].on && nodePos (b).getDistanceFrom (pt) < 12.0f)
+            if (eqedit::bandUsed (ctx, b + 1) && nodePos (b).getDistanceFrom (pt) < 12.0f)
                 return b;
         return -1;
     }
@@ -420,7 +445,9 @@ public:
     {
         cursor = e.position;
         const int n = nodeAt (e.position);
-        setTip (*this, n >= 0 ? "c:eq.node:" + juce::String (n + 1) : juce::String());
+        const auto pa = plotArea();
+        const bool overHint = ! compact && e.position.y > pa.getBottom() - 22.0f && e.position.x > pa.getRight() - 340.0f;
+        setTip (*this, n >= 0 ? "c:eq.node:" + juce::String (n + 1) : (overHint ? juce::String ("c:eq.add") : juce::String()));
         setMouseCursor (n >= 0 ? juce::MouseCursor::DraggingHandCursor : juce::MouseCursor::CrosshairCursor);
         repaint();
     }
@@ -430,20 +457,32 @@ public:
         repaint();
     }
 
+    juce::String id (int b, const char* field) const { return params::eq (b + 1, field); }
+
     void mouseDown (const juce::MouseEvent& e) override
     {
         dragBand = nodeAt (e.position);
         if (dragBand < 0)
             return;
         ctx.selectedEqBand = dragBand + 1;
+        ctx.selectedModule = 1;
+        if (e.mods.isAltDown())
+        {
+            eqedit::deleteBand (ctx, dragBand + 1);
+            dragBand = -1;
+            return;
+        }
         if (e.mods.isPopupMenu())
         {
             showNodeMenu (dragBand);
             dragBand = -1;
             return;
         }
-        for (auto* id : { "freq", "gain" })
-            ctx.apvts.getParameter (params::eq (dragBand + 1, id))->beginChangeGesture();
+        startPos = e.position;
+        startFreq = ctx.param (id (dragBand, "freq"));
+        startGain = ctx.param (id (dragBand, "gain"));
+        for (auto* f : { "freq", "gain" })
+            ctx.apvts.getParameter (id (dragBand, f))->beginChangeGesture();
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
@@ -451,46 +490,46 @@ public:
         cursor = e.position;
         if (dragBand < 0)
             return;
-        const double f = juce::jlimit (20.0, 20000.0, fOf (e.position.x));
-        const double gdb = juce::jlimit (-18.0, 18.0, eqOfY (e.position.y));
-        auto set = [&] (const char* id, float v)
+        const float k = e.mods.isShiftDown() ? 0.15f : 1.0f; // Shift: fine
+        const auto pa = plotArea();
+        double f = startFreq * std::pow (fMax / fMin, (e.position.x - startPos.x) * k / pa.getWidth());
+        f = juce::jlimit (20.0, 20000.0, ctx.eqSnap ? eqedit::snapToNote (f) : f);
+        auto set = [&] (const char* field, float v)
         {
-            auto* p = ctx.apvts.getParameter (params::eq (dragBand + 1, id));
+            auto* p = ctx.apvts.getParameter (id (dragBand, field));
             p->setValueNotifyingHost (p->convertTo0to1 (v));
         };
         set ("freq", (float) f);
         const auto kind = dsp::DynamicEq::kindOf (dragBand, eqSettings.bands[(size_t) dragBand].type);
+        const double dg = (eqOfY (e.position.y) - eqOfY (startPos.y)) * k;
         if (kind == dsp::EqKind::bell)
-            set ("gain", (float) gdb);
+            set ("gain", (float) juce::jlimit (-18.0, 18.0, startGain + dg));
         else if (kind == dsp::EqKind::lowShelf || kind == dsp::EqKind::highShelf)
-            set ("gain", (float) juce::jlimit (-18.0, 18.0, gdb * 2.0));
+            set ("gain", (float) juce::jlimit (-18.0, 18.0, startGain + dg * 2.0));
         update();
     }
 
     void mouseUp (const juce::MouseEvent&) override
     {
         if (dragBand >= 0)
-            for (auto* id : { "freq", "gain" })
-                ctx.apvts.getParameter (params::eq (dragBand + 1, id))->endChangeGesture();
+            for (auto* f : { "freq", "gain" })
+                ctx.apvts.getParameter (id (dragBand, f))->endChangeGesture();
         dragBand = -1;
     }
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
-        if (nodeAt (e.position) >= 0)
+        if (compact)
             return;
-        // add a band: first free bell band at this frequency
-        for (int b = 2; b <= 9; ++b)
-            if (ctx.param (params::eq (b, "on")) < 0.5f)
-            {
-                ctx.setParam ("eq_on", 1.0f);
-                ctx.setParam (params::eq (b, "on"), 1.0f);
-                ctx.setParam (params::eq (b, "type"), 0.0f);
-                ctx.setParam (params::eq (b, "freq"), (float) fOf (e.position.x));
-                ctx.setParam (params::eq (b, "gain"), (float) juce::jlimit (-18.0, 18.0, eqOfY (e.position.y)));
-                ctx.selectedEqBand = b;
-                return;
-            }
+        const int n = nodeAt (e.position);
+        if (n >= 0)
+        {
+            // double-click on a point: band on/off (bypass), the settings stay
+            ctx.setParam (id (n, "on"), ctx.param (id (n, "on")) >= 0.5f ? 0.0f : 1.0f);
+            return;
+        }
+        if (plotArea().contains (e.position))
+            eqedit::addBandAt (ctx, fOf (e.position.x), eqOfY (e.position.y));
     }
 
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
@@ -498,8 +537,16 @@ public:
         const int b = nodeAt (e.position);
         if (b < 0)
             return;
-        auto* p = ctx.apvts.getParameter (params::eq (b + 1, "q"));
-        const float step = (w.deltaY > 0 ? 1.0f : -1.0f) * (e.mods.isShiftDown() ? 0.005f : 0.03f);
+        const float dir = (w.deltaY > 0 ? 1.0f : -1.0f) * (w.isReversed ? -1.0f : 1.0f);
+        if (eqedit::isCut (ctx, b + 1))
+        {
+            // cuts: the wheel changes the slope
+            const int s = juce::jlimit (0, 5, juce::roundToInt (ctx.param (id (b, "slope"))) + (dir > 0 ? 1 : -1));
+            ctx.setParam (id (b, "slope"), (float) s);
+            return;
+        }
+        auto* p = ctx.apvts.getParameter (id (b, "q"));
+        const float step = dir * (e.mods.isShiftDown() ? 0.005f : 0.03f);
         p->beginChangeGesture();
         p->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, p->getValue() + step));
         p->endChangeGesture();
@@ -518,21 +565,41 @@ public:
         for (int i = 0; i < params::choice::placement.size(); ++i)
             place.addItem (200 + i, params::choice::placement[i], true, juce::roundToInt (ctx.param (params::eq (band, "place"))) == i);
         m.addSubMenu ("Placement", place);
-        m.addItem (300, "Dynamic", true, ctx.param (params::eq (band, "dyn")) >= 0.5f);
-        m.addItem (301, "All band settings...");
-        m.addItem (302, "Turn band off");
-        m.showMenuAsync (juce::PopupMenu::Options(), [this, band] (int r)
+        if (eqedit::isCut (ctx, band))
+        {
+            juce::PopupMenu slopes;
+            const auto* slopeSpec = params::find (params::eq (band, "slope"));
+            for (int i = 0; i < slopeSpec->choices.size(); ++i)
+                slopes.addItem (400 + i, slopeSpec->choices[i], true, juce::roundToInt (ctx.param (params::eq (band, "slope"))) == i);
+            m.addSubMenu ("Slope", slopes);
+        }
+        else
+            m.addItem (300, "Dynamic", true, ctx.param (params::eq (band, "dyn")) >= 0.5f);
+        m.addSeparator();
+        m.addItem (303, "Snap to notes", true, ctx.eqSnap);
+        const double nf = eqedit::snapToNote (ctx.param (params::eq (band, "freq")));
+        m.addItem (304, "Move to nearest note: " + eqedit::noteText (nf).upToFirstOccurrenceOf (" ", false, false) + " (" + eqedit::freqText (nf) + ")");
+        m.addSeparator();
+        m.addItem (302, "Bypass band (double-click)", true, ctx.param (params::eq (band, "on")) < 0.5f);
+        m.addItem (305, "Delete band (Alt+click)");
+        m.showMenuAsync (juce::PopupMenu::Options(), [this, band, nf] (int r)
         {
             if (r >= 100 && r < 200)
                 ctx.setParam (params::eq (band, "type"), (float) (r - 100));
             else if (r >= 200 && r < 300)
                 ctx.setParam (params::eq (band, "place"), (float) (r - 200));
+            else if (r >= 400 && r < 500)
+                ctx.setParam (params::eq (band, "slope"), (float) (r - 400));
             else if (r == 300)
                 ctx.setParam (params::eq (band, "dyn"), ctx.param (params::eq (band, "dyn")) >= 0.5f ? 0.0f : 1.0f);
-            else if (r == 301 && ctx.showModuleDetail)
-                ctx.showModuleDetail ("eq");
             else if (r == 302)
-                ctx.setParam (params::eq (band, "on"), 0.0f);
+                ctx.setParam (params::eq (band, "on"), ctx.param (params::eq (band, "on")) >= 0.5f ? 0.0f : 1.0f);
+            else if (r == 303)
+                ctx.eqSnap = ! ctx.eqSnap;
+            else if (r == 304)
+                ctx.setParam (params::eq (band, "freq"), (float) nf);
+            else if (r == 305)
+                eqedit::deleteBand (ctx, band);
         });
     }
 
@@ -545,6 +612,8 @@ public:
     std::vector<reference::EqSuggestion> previewEq;
     std::optional<juce::Point<float>> cursor;
     int dragBand = -1, normCounter = 0;
+    juce::Point<float> startPos;
+    double startFreq = 1000.0, startGain = 0.0;
 };
 
 // ==================================================================================================
@@ -642,6 +711,11 @@ SpectrumPanel::SpectrumPanel (Context& c, bool comp) : ctx (c), compact (comp)
 {
     plot = std::make_unique<Plot> (ctx, compact);
     addAndMakeVisible (*plot);
+    if (! compact)
+    {
+        bandPanel = std::make_unique<BandFields> (ctx, true);
+        addChildComponent (*bandPanel);
+    }
     if (compact)
     {
         addAndMakeVisible (modeCompact);
@@ -712,11 +786,38 @@ void SpectrumPanel::applySettings()
 void SpectrumPanel::update()
 {
     plot->update();
+    placeBandPanel();
     mode.setSelected (ctx.spectrumMode, false);
     view.setSelected (ctx.delta ? 1 : 0, false);
     view.setEnabled (ctx.refs.target().count > 0);
     if (ctx.refs.target().count == 0)
         ctx.delta = false;
+}
+
+void SpectrumPanel::placeBandPanel()
+{
+    if (bandPanel == nullptr)
+        return;
+    const int b = ctx.selectedEqBand;
+    const bool show = ctx.selectedModule == 1 && b >= 1 && b <= 10 && eqedit::bandUsed (ctx, b) && (popup == nullptr || ! popup->isVisible());
+    if (! show)
+    {
+        bandPanel->setVisible (false);
+        return;
+    }
+    bandPanel->setBand (b);
+    bandPanel->update();
+    const auto pos = plot->nodePos (b - 1) + plot->getPosition().toFloat();
+    const auto pa = plot->plotArea() + plot->getPosition().toFloat();
+    const auto size = bandPanel->preferredSize();
+    const int x = juce::jlimit ((int) pa.getX(), std::max ((int) pa.getX(), (int) pa.getRight() - size.x), juce::roundToInt (pos.x) - size.x / 2);
+    const bool below = pos.y + 18 + size.y < pa.getBottom();
+    const int yWanted = below ? juce::roundToInt (pos.y) + 18 : juce::roundToInt (pos.y) - 18 - size.y;
+    // stay inside the plot (small windows: the panel may cover the point, never the header)
+    const int y = std::max ((int) pa.getY(), std::min (yWanted, (int) pa.getBottom() - size.y));
+    bandPanel->setBounds (x, y, size.x, size.y);
+    if (! bandPanel->isVisible())
+        bandPanel->setVisible (true);
 }
 
 void SpectrumPanel::paint (juce::Graphics& g)

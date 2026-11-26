@@ -10,6 +10,31 @@ const std::map<juce::String, juce::String>& russianTable()
         const auto add = [&m] (const char* en, const char* ru) { m[juce::String (juce::CharPointer_UTF8 (en))] = juce::String (juce::CharPointer_UTF8 (ru)); };
         // headings
         add ("Spectrum", "Спектр");
+        // Master workspace (mockups v5-v9)
+        add ("Gain reduction, last 10 s", "Ослабление (GR), последние 10 с");
+        add ("All parameters of the module are here. Hover any control for advice.", "Здесь все параметры модуля. Наведите курсор на элемент, чтобы увидеть совет.");
+        add ("trim, polarity and the subsonic filter", "уровень, полярность и фильтр Subsonic");
+        add ("10 bands, dynamic per band", "10 полос, каждая может быть динамической");
+        add ("5-band dynamics, drag the yellow handles to move the crossovers", "компрессия в 5 полосах, жёлтые ручки двигают частоты раздела");
+        add ("mono maker, phase rotator, translator", "моно низа, поворот фазы, транслятор");
+        add ("glue compressor for the whole mix", "компрессор «склейки» для всего микса");
+        add ("three bands, oversampled, drag a band up or down to set its drive", "три полосы, тяните полосу вверх или вниз, чтобы изменить Drive");
+        add ("width per band and the correlation guard", "ширина по полосам и защита корреляции");
+        add ("shaves drum peaks before the limiter", "срезает пики барабанов перед лимитером");
+        add ("true-peak-safe look-ahead limiter", "лимитер с упреждением и контролем true peak");
+        add ("final gain and dither", "итоговый уровень и дизеринг");
+        add ("select it on the spectrum or with the numbers", "выберите полосу на спектре или номером");
+        add ("cuts narrow ringing peaks", "убирает узкие звенящие пики");
+        add ("Click a number to select", "Клик по номеру выбирает полосу");
+        add ("edit points on the spectrum", "точки меняются на спектре");
+        add ("Oversampling follows Quality", "Передискретизация по настройке Quality");
+        add ("Double-click: add a band", "Двойной клик — новая полоса");
+        add ("at the edges: low cut / high cut", "у краёв — Low cut / High cut");
+        add ("open Eyes for history", "история — на вкладке Eyes");
+        add ("hover for advice", "наведите курсор для совета");
+        add ("10 s", "10 с");
+        add ("Ref set", "Референсы");
+        add ("Default", "По умолчанию");
         add ("Signal chain", "Цепочка обработки");
         add ("10 modules, fixed order: left to right, top to bottom", "10 модулей, порядок фиксирован: слева направо, сверху вниз");
         add ("Chain latency", "Задержка цепочки");

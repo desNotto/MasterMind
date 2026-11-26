@@ -117,7 +117,7 @@ Only the selected reference is decoded into memory for playback; analysis result
 
 ## D-022 Interface details beyond the mockup
 
-The mockup shows the key controls of each module. Every other parameter is reachable through a module detail panel (double-click a module name) with generic controls and generic tooltips. Also added: a Match EQ panel in the spectrum header, a reference player strip in the tab bar while B is active, a medium layout and a compact top bar for narrow windows, band listen buttons on the Low-End tab, and the harshness (5.7), dynamics per band (5.8) and limiter damage (5.9) panels under the spectrogram. Turning Rotate or Translator above zero switches that sub-feature on; touching a Release knob turns Auto release off.
+The mockup shows the key controls of each module. Every other parameter was reachable through a module detail panel (double-click a module name) with generic controls and generic tooltips. Superseded by D-028: since mockup v9 every module editor shows all of its controls and the detail panel is gone. Also added: a Match EQ panel in the spectrum header, a reference player strip in the tab bar while B is active, a medium layout and a compact top bar for narrow windows, band listen buttons on the Low-End tab, and the harshness (5.7), dynamics per band (5.8) and limiter damage (5.9) panels under the spectrogram. Turning Rotate or Translator above zero switches that sub-feature on; touching a Release knob turns Auto release off.
 
 ## D-023 Localisation scope
 
@@ -129,7 +129,7 @@ Analysis resets on every transport start while "Reset on play" is on (the user c
 
 ## D-025 Resonance suppressor (4.2, optional)
 
-Implemented inside the Dynamic EQ module, after the ten bands, with new parameter IDs `rs_on`, `rs_low`, `rs_high`, `rs_depth`, `rs_sharp`, `rs_speed`, `rs_mix`, `rs_delta` (adding IDs keeps old projects compatible). STFT with a frame of 2048 samples at 44.1/48 kHz (4096 up to 96 kHz, 8192 above), Hann windows, 75 % overlap, linked L/R gains. A bin is cut when it rises above the log-spectrum averaged over a fraction of an octave (Sharpness sets width and threshold), limited by Depth, smoothed by Speed. `rs_on` is not automatable because it adds one frame of latency, which is then reported. Its controls are in the Dynamic EQ detail panel (double-click "Dynamic EQ").
+Implemented inside the Dynamic EQ module, after the ten bands, with new parameter IDs `rs_on`, `rs_low`, `rs_high`, `rs_depth`, `rs_sharp`, `rs_speed`, `rs_mix`, `rs_delta` (adding IDs keeps old projects compatible). STFT with a frame of 2048 samples at 44.1/48 kHz (4096 up to 96 kHz, 8192 above), Hann windows, 75 % overlap, linked L/R gains. A bin is cut when it rises above the log-spectrum averaged over a fraction of an octave (Sharpness sets width and threshold), limited by Depth, smoothed by Speed. `rs_on` is not automatable because it adds one frame of latency, which is then reported. Its controls are in the Dynamic EQ editor on the Master tab (section "Resonance suppressor", D-028).
 
 ## D-026 Offline album analyzer (7.5, optional)
 
@@ -138,3 +138,15 @@ Implemented inside the Dynamic EQ module, after the ten bands, with new paramete
 ## D-027 Two factory presets removed (2026-11-27)
 
 At the user's request the factory presets "Tight Modern Metal" and "Wide and Loud" were removed. The remaining factory presets are Init, Djent Low-End Focus, Gentle Glue and Streaming Safe. A project that refers to a removed preset keeps its stored parameter values and shows the preset as modified.
+
+## D-028 Master workspace (approved mockup v9, 2026-11-27)
+
+The Master tab follows mockup v9 (which includes v5 to v8): spectrum, module bar with ten tiles, the editor of the selected module with every control, and the balance column (tonal balance, loudness, non-tonal checks). The module strip and the double-click detail panel are removed. Details the mockup does not fix:
+
+- **Sizes.** At 1280 x 800 the spectrum is 280 units high. In smaller full-mode windows it shrinks (down to 150) so that the tallest editor (Multiband) still fits without scrolling. The balance column is 31 % of the width, 300 to 392 units. In the medium layout mode the balance column is left out (it stays on the Eyes tab) and an editor that does not fit scrolls; in the compact mode (640 x 400) the module bar scrolls with the selection and Multiband and Saturation show one band at a time, as in the mockup.
+- **EQ bands on the spectrum.** There is one on/off parameter per band, so a band "exists" on the spectrum when it is on or when any of its settings differs from the default. Double-click on a point (bypass) switches it off and keeps it visible as a dashed point; Delete (Alt+click, menu, the cross button) resets every parameter of the band to its default, which removes the point. Only band 1 can be a low cut and only band 10 a high cut (parameter IDs are frozen): a double-click below 30 Hz makes band 1 a low cut, above 14 kHz band 10 a high cut; if that band is in use, a free band 2-9 becomes a low or high shelf and a short message says so. Frequency fields accept Hz, kHz and note names (E1, D#2, Bb3; A4 = 440 Hz). Snap rounds to the nearest semitone.
+- **Threshold rings.** The ring shows the level the threshold acts on: the band detector of Multiband and of a dynamic EQ band, the Bus Comp detector, the Clipper input peak (oversampled) and, for the correlation guard, the lowest correlation of the guarded bands (inverse colours). The DSP stores the block maximum in relaxed atomics; the UI rises at once and falls at about 20 % of the scale per second. No ring when the module (or band) is off.
+- **Multiband Auto release.** The Release knob shows "Auto" when `mb_bN_rel_auto` is on; right-click the knob to switch Auto release, moving it switches Auto off.
+- **Tonal advice.** The twelve approved texts (mockup v7) are generated into `TooltipText.cpp` by `tools/gen_tooltips.py`. The first step names the Dynamic EQ band that cuts a band below target ("Dynamic EQ уменьшает этот диапазон: полоса N, ...") or boosts a band above target ("Dynamic EQ поднимает этот диапазон: полоса N, ... Сделайте подъём меньше."), when there is one; the second wording follows the approved first. Without such a band, Low-mid below target starts with "Dynamic EQ: Bell 250 Hz, Q 1.0, +1 dB." A tooltip shows at most three steps. Green rows show no tooltip.
+- **Saturation transfer curve.** Drawn with the module's own shaper (`Saturation::shape`) at the band's drive, asymmetry and mix; the bright part spans the band's input peak of the last block.
+

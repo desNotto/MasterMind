@@ -4,20 +4,30 @@
 
 namespace mm::ui
 {
-/** Tonal balance (5.2). */
+/** Tonal balance (5.2). The compact variant is the Master balance column (mockup v5); yellow and
+    red rows show an advice tooltip (mockup v7). */
 class TonalPanel final : public juce::Component
 {
 public:
-    explicit TonalPanel (Context& c);
+    explicit TonalPanel (Context& c, bool compact = false);
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseMove (const juce::MouseEvent&) override;
+    int preferredHeight() const { return compact ? 32 + 8 + 6 * 29 + 8 : 300; }
 
 private:
     Context& ctx;
+    bool compact;
     Segmented basis { { "Integrated", "Last 10 s" } };
     Btn target { "Target" };
     juce::Rectangle<int> rowsArea;
+    struct Row
+    {
+        juce::Rectangle<int> area;
+        int kind = 3;
+        double dev = 0.0, corridor = 1.5;
+    };
+    std::array<Row, analysis::numTonalBands> rows;
 };
 
 /** Loudness and dynamics (5.3). */
@@ -33,18 +43,19 @@ private:
     Btn target { "Target: Streaming ref" };
 };
 
-/** Checks summary (5.10). */
+/** Checks summary (5.10). skipTonal: the Master balance column, where the tonal bands have their
+    own panel (mockup v5). */
 class ChecksPanel final : public juce::Component
 {
 public:
-    ChecksPanel (Context& c, bool compact);
+    ChecksPanel (Context& c, bool compact, bool skipTonal = false);
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
 
 private:
     Context& ctx;
-    bool compact;
+    bool compact, skipTonal;
     int hover = -1;
     juce::Rectangle<int> listArea;
 };
@@ -94,6 +105,12 @@ private:
     StereoPanel stereo;
     bool medium = false;
 };
+
+/** First advice step built from the current Dynamic EQ (mockup v7): names the band that cuts
+    (below target) or boosts (above target) the tonal band. Empty when there is none. */
+juce::String tonalEqStep (const Context& c, int band, double deviation);
+/** Tooltip for a tonal band: advice for yellow and red, nothing for green. */
+juce::String tonalTip (const Context& c, int band, int kind, double deviation, double corridor);
 
 /** Shared drawing helpers. */
 void drawVectorscope (juce::Graphics& g, juce::Rectangle<float> r, const std::vector<std::pair<float, float>>& pts);

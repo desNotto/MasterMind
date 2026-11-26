@@ -56,6 +56,8 @@ public:
 
     /** Effective (dynamic) gain of each band in dB for the UI. */
     float effectiveGainDb (int band) const noexcept { return meters[(size_t) band].get(); }
+    /** Detector level of a dynamic band in dB (the level the threshold acts on); -100 otherwise. */
+    float detectorLevelDb (int band) const noexcept { return levelMeters[(size_t) band].get(); }
 
     /** Builds and loads the linear-phase kernels for a settings snapshot. Allocates: call from a
         worker thread, never from the audio thread. */
@@ -89,7 +91,7 @@ private:
     double fs = 48000.0;
     int maxBlock = 512, firLength = 4096;
     std::array<BandState, numBands> state;
-    std::array<Meter, numBands> meters;
+    std::array<Meter, numBands> meters, levelMeters;
 
     std::array<juce::dsp::Convolution, 4> conv; // LL, LR, RL, RR
     juce::AudioBuffer<float> scratch;

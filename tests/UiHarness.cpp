@@ -2,6 +2,7 @@
 // control leaves the window or overlaps a neighbouring control, and writes PNG snapshots.
 #include "PluginProcessor.h"
 #include "ui/Locale.h"
+#include "ui/ModuleEditors.h"
 #include "ui/PluginEditor.h"
 #include "ui/Widgets.h"
 
@@ -44,7 +45,7 @@ int checkLayout (juce::Component& root, const juce::String& label)
     for (size_t i = 0; i < controls.size(); ++i)
     {
         auto* a = controls[i];
-        if (insideViewport (a) || dynamic_cast<mm::ui::ModuleDetail*> (a->getParentComponent()) != nullptr)
+        if (insideViewport (a))
             continue;
         const auto ra = root.getLocalArea (a, a->getLocalBounds());
         if (ra.isEmpty() || ! bounds.contains (ra))
@@ -130,6 +131,12 @@ int main (int argc, char** argv)
                 dynamic_cast<MasterMindEditor*> (e.get())->forceUpdate();
                 (void) e->createComponentSnapshot (e->getLocalBounds(), true, 0.5f);
             }
+            for (int m = 0; m < 10; ++m)
+            {
+                dynamic_cast<MasterMindEditor*> (e.get())->selectModule (m);
+                dynamic_cast<MasterMindEditor*> (e.get())->forceUpdate();
+                (void) e->createComponentSnapshot (e->getLocalBounds(), true, 0.5f);
+            }
         }
         std::printf ("unprepared editor: ok\n");
     }
@@ -201,27 +208,49 @@ int main (int argc, char** argv)
         int w, h;
         const char* tab;
         bool monitor;
+        int module = 2; // Master editor: 0 Input ... 9 Output
     };
-    const Shot shots[] = { { 1280, 800, "Master", false }, { 1280, 800, "Eyes", false },   { 1536, 960, "Master", true },     { 1536, 960, "Eyes", false },
-                           { 640, 400, "Overview", false }, { 640, 400, "Overview", true }, { 1280, 800, "Low-End", false },   { 1280, 800, "Stereo", false },
-                           { 1280, 800, "Spectrogram", false }, { 1280, 800, "Album", false }, { 960, 600, "Master", false }, { 960, 600, "Eyes", false },
-                           { 480, 300, "Overview", false }, { 720, 460, "Master", false }, { 1000, 640, "Master", false }, { 3840, 2160, "Master", false } };
+    const Shot shots[] = { { 1280, 800, "Master", false, 2 },     { 1280, 800, "Master", false, 1 },  { 1280, 800, "Master", false, 5 },
+                           { 1280, 800, "Master", false, 4 },     { 1280, 800, "Master", false, 8 },  { 1280, 800, "Eyes", false },
+                           { 1536, 960, "Master", true, 2 },      { 1536, 960, "Master", false, 5 },  { 1536, 960, "Eyes", false },
+                           { 640, 400, "Overview", false },       { 640, 400, "Overview", true },     { 640, 400, "Master", false, 2 },
+                           { 640, 400, "Master", false, 5 },      { 1280, 800, "Low-End", false },    { 1280, 800, "Stereo", false },
+                           { 1280, 800, "Spectrogram", false },   { 1280, 800, "Album", false },      { 960, 600, "Master", false, 2 },
+                           { 960, 600, "Eyes", false },           { 480, 300, "Overview", false },    { 720, 460, "Master", false, 1 },
+                           { 1000, 640, "Master", false, 2 },     { 1000, 640, "Master", false, 5 },  { 3840, 2160, "Master", false, 2 } };
     int failures = 0;
+    // every module editor at the reference size and at the smallest full-mode window
+    for (auto [w, h] : { std::pair { 1280, 800 }, std::pair { 1000, 640 }, std::pair { 640, 400 } })
+        for (int m = 0; m < 10; ++m)
+        {
+            editor->setSize (w, h);
+            editor->showTab ("Master");
+            editor->selectModule (m);
+            for (int i = 0; i < 2; ++i)
+            {
+                juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+                editor->forceUpdate();
+            }
+            failures += checkLayout (editor->getRoot(), juce::String (w) + "x" + juce::String (h) + " Master " + mm::ui::moduleList()[(size_t) m].key);
+        }
     for (const auto& s : shots)
     {
         proc.getMonitoring().listenMode = s.monitor ? 1 : 0;
         feedAudio (proc, 0.5);
         editor->setSize (s.w, s.h);
         editor->showTab (s.tab);
+        if (juce::String (s.tab) == "Master")
+            editor->selectModule (s.module);
         for (int i = 0; i < 6; ++i)
         {
             juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
             editor->forceUpdate();
         }
-        const juce::String label = juce::String (s.w) + "x" + juce::String (s.h) + " " + s.tab + (s.monitor ? " monitor" : "");
+        const juce::String mod = juce::String (s.tab) == "Master" ? juce::String ("-") + mm::ui::moduleList()[(size_t) s.module].key : juce::String();
+        const juce::String label = juce::String (s.w) + "x" + juce::String (s.h) + " " + s.tab + mod + (s.monitor ? " monitor" : "");
         failures += checkLayout (editor->getRoot(), label);
         auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
-        const auto file = outDir.getChildFile (juce::String (s.w) + "x" + juce::String (s.h) + "-" + juce::String (s.tab).toLowerCase() + (s.monitor ? "-monitor" : "") + ".png");
+        const auto file = outDir.getChildFile (juce::String (s.w) + "x" + juce::String (s.h) + "-" + juce::String (s.tab).toLowerCase() + mod + (s.monitor ? "-monitor" : "") + ".png");
         file.deleteFile();
         juce::FileOutputStream os (file);
         juce::PNGImageFormat().writeImageToStream (image, os);
@@ -229,10 +258,11 @@ int main (int argc, char** argv)
     }
     // Russian interface strings
     mm::ui::setLanguage (mm::ui::Language::russian);
-    for (const char* tab : { "Eyes", "Spectrogram" })
+    for (const char* tab : { "Eyes", "Spectrogram", "Master" })
     {
         editor->setSize (1280, 800);
         editor->showTab (tab);
+        editor->selectModule (5);
         for (int i = 0; i < 4; ++i)
         {
             juce::MessageManager::getInstance()->runDispatchLoopUntil (40);

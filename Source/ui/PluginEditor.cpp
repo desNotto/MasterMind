@@ -331,7 +331,6 @@ MasterMindEditor::MasterMindEditor (MasterMindProcessor& p) : AudioProcessorEdit
     ctx.engine.setTargets (targets);
 
     ctx.showTab = [this] (const juce::String& t) { showTab (t); };
-    ctx.showModuleDetail = [this] (const juce::String& k) { showModuleDetail (k); };
     ctx.notify = [this] (const juce::String& m) { notify (m); };
 
     root = std::make_unique<Root>();
@@ -339,20 +338,16 @@ MasterMindEditor::MasterMindEditor (MasterMindProcessor& p) : AudioProcessorEdit
     topBar = std::make_unique<TopBar> (ctx);
     tabBar = std::make_unique<TabBar> (ctx, *this);
     footer = std::make_unique<Footer> (ctx);
-    spectrum = std::make_unique<SpectrumPanel> (ctx, false);
     spectrumCompact = std::make_unique<SpectrumPanel> (ctx, true);
-    strip = std::make_unique<ModuleStrip> (ctx);
-    stripViewport = std::make_unique<juce::Viewport>();
-    stripViewport->setScrollBarsShown (false, true);
+    master = std::make_unique<MasterView> (ctx);
     eyes = std::make_unique<EyesView> (ctx);
     checksCompact = std::make_unique<ChecksPanel> (ctx, true);
     lowEnd = std::make_unique<LowEndView> (ctx);
     stereo = std::make_unique<StereoView> (ctx);
     spectrogram = std::make_unique<SpectrogramView> (ctx);
     albumView = std::make_unique<AlbumView> (ctx);
-    for (juce::Component* c : std::initializer_list<juce::Component*> { topBar.get(), tabBar.get(), footer.get(), spectrum.get(), spectrumCompact.get(), strip.get(),
-                                                                         stripViewport.get(), eyes.get(), checksCompact.get(), lowEnd.get(), stereo.get(),
-                                                                         spectrogram.get(), albumView.get() })
+    for (juce::Component* c : std::initializer_list<juce::Component*> { topBar.get(), tabBar.get(), footer.get(), spectrumCompact.get(), master.get(),
+                                                                         eyes.get(), checksCompact.get(), lowEnd.get(), stereo.get(), spectrogram.get(), albumView.get() })
         root->addChildComponent (c);
     root->addChildComponent (bubble);
     bubble.setInterceptsMouseClicks (false, false);
@@ -379,7 +374,6 @@ MasterMindEditor::~MasterMindEditor()
     processorRef.onStateRestored = nullptr;
     saveSizeIfChanged();
     processorRef.syncExtraState();
-    detail.reset();
     root.reset();
     juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     setLookAndFeel (nullptr);
@@ -406,13 +400,9 @@ void MasterMindEditor::notify (const juce::String& message)
     repaint();
 }
 
-void MasterMindEditor::showModuleDetail (const juce::String& key)
+void MasterMindEditor::selectModule (int index)
 {
-    detail = std::make_unique<ModuleDetail> (ctx, key);
-    detail->onClose = [this] { juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MasterMindEditor> (this)] { if (safe) safe->detail.reset(); }); };
-    root->addAndMakeVisible (*detail);
-    detail->setBounds (root->getLocalBounds());
-    bubble.toFront (false);
+    master->selectModule (index);
 }
 
 void MasterMindEditor::paint (juce::Graphics& g) { g.fillAll (col::bg); }
@@ -464,55 +454,26 @@ void MasterMindEditor::resized()
     const auto preset = mm::window::presetFor (currentSize());
     topBar->setSizeLabel (preset == mm::window::SizePreset::custom ? juce::String ("Custom") : juce::String (mm::window::presetName (preset)));
     layoutContent();
-    if (detail != nullptr)
-        detail->setBounds (root->getLocalBounds());
     if (initialised)
         saveDueAtMs = juce::Time::getMillisecondCounterHiRes() + saveDebounceMs;
 }
 
 void MasterMindEditor::layoutContent()
 {
-    for (juce::Component* c : std::initializer_list<juce::Component*> { spectrum.get(), spectrumCompact.get(), stripViewport.get(), eyes.get(), checksCompact.get(),
+    for (juce::Component* c : std::initializer_list<juce::Component*> { spectrumCompact.get(), master.get(), eyes.get(), checksCompact.get(),
                                                                          lowEnd.get(), stereo.get(), spectrogram.get(), albumView.get() })
         c->setVisible (false);
-    if (stripViewport->getViewedComponent() == strip.get())
-        stripViewport->setViewedComponent (nullptr, false);
-    root->addChildComponent (*strip);
-    strip->setVisible (false);
 
     const bool compact = mode == LayoutMode::compact;
     auto r = root->getLocalBounds().withTrimmedTop (tabBar->getBottom()).withTrimmedBottom (compact ? 20 : 24).reduced (compact ? 6 : 8);
     const int gap = compact ? 6 : 8;
     const auto t = currentTab;
 
-    if (t == "Master" && ! compact)
+    if (t == "Master")
     {
-        const int stripH = mode == LayoutMode::full ? 310 : std::max (220, r.getHeight() * 46 / 100);
-        auto bottom = r.removeFromBottom (stripH);
-        r.removeFromBottom (gap);
-        spectrum->setBounds (r);
-        spectrum->setVisible (true);
-        if (bottom.getWidth() >= 1240)
-        {
-            strip->setBounds (bottom);
-            strip->setVisible (true);
-        }
-        else
-        {
-            stripViewport->setBounds (bottom);
-            stripViewport->setViewedComponent (strip.get(), false);
-            strip->setBounds (0, 0, 1260, bottom.getHeight() - 8);
-            strip->setVisible (true);
-            stripViewport->setVisible (true);
-        }
-    }
-    else if (t == "Master" && compact)
-    {
-        stripViewport->setBounds (r);
-        stripViewport->setViewedComponent (strip.get(), false);
-        strip->setBounds (0, 0, 1260, std::max (260, r.getHeight() - 8));
-        strip->setVisible (true);
-        stripViewport->setVisible (true);
+        master->setMode (compact ? MasterView::Mode::compact : (mode == LayoutMode::full ? MasterView::Mode::full : MasterView::Mode::medium));
+        master->setBounds (r);
+        master->setVisible (true);
     }
     else if (t == "Overview")
     {
@@ -638,12 +599,10 @@ void MasterMindEditor::timerCallback()
     if (frame % 3 == 0)
         topBar->update();
     footer->repaint();
-    if (spectrum->isVisible())
-        spectrum->update();
     if (spectrumCompact->isVisible())
         spectrumCompact->update();
-    if (strip->isVisible() && frame % 2 == 0)
-        strip->update();
+    if (master->isVisible())
+        master->update();
     if (eyes->isVisible())
         eyes->update();
     if (checksCompact->isVisible())

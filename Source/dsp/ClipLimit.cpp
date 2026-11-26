@@ -90,6 +90,7 @@ void Clipper::process (float* left, float* right, int numSamples) noexcept
     }
     os.down (block);
     prMeter.set (inPeak > 1.0e-9 ? (float) std::min (0.0, gainToDb (outPeak / inPeak)) : 0.0f);
+    inMeter.set ((float) gainToDb (inPeak + 1.0e-9));
 }
 
 // ---- Limiter -----------------------------------------------------------------------------------------

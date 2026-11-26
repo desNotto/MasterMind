@@ -2,6 +2,7 @@
 
 #include "reference/MatchEq.h"
 #include "ui/Context.h"
+#include "ui/EqControls.h"
 
 namespace mm::ui
 {
@@ -19,6 +20,7 @@ private:
     class Plot;
     class MatchEqPopup;
     void applySettings();
+    void placeBandPanel();
 
     Context& ctx;
     bool compact;
@@ -29,6 +31,7 @@ private:
     Btn matchEq { "Match EQ" };
     std::unique_ptr<Plot> plot;
     std::unique_ptr<MatchEqPopup> popup;
+    std::unique_ptr<BandFields> bandPanel;
     juce::Rectangle<int> legendArea;
 };
 } // namespace mm::ui

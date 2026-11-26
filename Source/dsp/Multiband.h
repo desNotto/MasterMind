@@ -37,6 +37,8 @@ public:
     int latency() const noexcept override { return settings.linearPhase ? firLength / 2 : 0; }
 
     float gainReductionDb (int band) const noexcept { return grMeters[(size_t) band].get(); }
+    /** Highest detector level of the last block in dB (the level the threshold acts on); -100 when bypassed. */
+    float bandLevelDb (int band) const noexcept { return levelMeters[(size_t) band].get(); }
 
     /** Builds linear-phase crossover kernels (allocates; worker thread only). */
     void buildLinearPhase (const Settings& snapshot);
@@ -67,7 +69,7 @@ private:
         Ramp makeup, trim, mix;
     };
     std::array<BandDyn, numBands> dyn;
-    std::array<Meter, numBands> grMeters;
+    std::array<Meter, numBands> grMeters, levelMeters;
 
     juce::AudioBuffer<float> bandBuf; // [ch * numBands + band]
     juce::AudioBuffer<float> scratch;

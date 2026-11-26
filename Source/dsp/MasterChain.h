@@ -63,6 +63,7 @@ public:
     const LowEnd& getLowEnd() const noexcept { return lowEndModule; }
     const BusComp& getBusComp() const noexcept { return busModule; }
     const StereoStage& getStereo() const noexcept { return stereoModule; }
+    const Saturation& getSaturation() const noexcept { return satModule; }
     const Clipper& getClipper() const noexcept { return clipModule; }
     const Limiter& getLimiter() const noexcept { return limModule; }
     const InputStage& getInput() const noexcept { return inputModule; }
