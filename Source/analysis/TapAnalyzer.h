@@ -65,7 +65,7 @@ public:
     double sampleRate() const { return fs; }
     /** Per-bin power (mean square contribution) for the channel: average since reset, peak hold,
         and the most recent frame. */
-    const std::vector<float>& averagePower (SpecChannel c) const { return avg[(size_t) c]; }
+    const std::vector<float>& averagePower (SpecChannel c) const;
     const std::vector<float>& peakPower (SpecChannel c) const { return peak[(size_t) c]; }
     const std::vector<float>& framePower (SpecChannel c) const { return frame[(size_t) c]; }
     uint64_t frameCount() const { return frames; }
@@ -126,7 +126,9 @@ private:
     std::vector<float> window, ringL, ringR, work;
     int ringPos = 0;
     double windowPower = 1.0;
-    std::array<std::vector<float>, numSpecChannels> avg, peak, frame;
+    mutable std::array<std::vector<float>, numSpecChannels> avg; // computed lazily from sum
+    mutable std::array<uint64_t, numSpecChannels> avgFrames {};
+    std::array<std::vector<float>, numSpecChannels> peak, frame;
     std::array<std::vector<double>, numSpecChannels> sum;
     uint64_t frames = 0;
 

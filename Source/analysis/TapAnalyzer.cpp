@@ -53,6 +53,19 @@ std::array<double, numTonalBands> defaultTonalTarget()
 double defaultHarshnessTarget() { return safeDb (slopeEnergy (3000.0, 8000.0) / slopeEnergy (500.0, 2000.0)); }
 
 TapAnalyzer::TapAnalyzer() = default;
+
+const std::vector<float>& TapAnalyzer::averagePower (SpecChannel c) const
+{
+    const auto i = (size_t) c;
+    if (avgFrames[i] != frames)
+    {
+        avgFrames[i] = frames;
+        const double inv = frames > 0 ? 1.0 / (double) frames : 0.0;
+        for (size_t k = 0; k < avg[i].size(); ++k)
+            avg[i][k] = (float) (sum[i][k] * inv);
+    }
+    return avg[i];
+}
 TapAnalyzer::~TapAnalyzer() = default;
 
 void TapAnalyzer::prepare (double sampleRate, int fftOrder)
@@ -78,17 +91,17 @@ void TapAnalyzer::prepare (double sampleRate, int fftOrder)
 
     for (int b = 0; b < numTonalBands; ++b)
     {
-        crest[(size_t) b].hp.setSections (dsp::butterworth (4, true, fs, tonalEdges[b]));
-        crest[(size_t) b].lp.setSections (dsp::butterworth (4, false, fs, std::min (tonalEdges[b + 1], fs * 0.45)));
+        crest[(size_t) b].hp.setSections (dsp::butterworth (2, true, fs, tonalEdges[b]));
+        crest[(size_t) b].lp.setSections (dsp::butterworth (2, false, fs, std::min (tonalEdges[b + 1], fs * 0.45)));
     }
 
     for (int ch = 0; ch < 2; ++ch)
     {
         for (int k = 0; k < numStereoBands - 1; ++k)
-            stereoSplit[(size_t) ch][(size_t) k].setup (4, fs, stereoEdges[k]);
+            stereoSplit[(size_t) ch][(size_t) k].setup (2, fs, stereoEdges[k]);
         // band 0 gets the allpass of splits 1 and 2, band 1 of split 2 (summed into one cascade each)
-        std::vector<dsp::Coeffs> ap0 = dsp::butterworthAllpass (2, fs, stereoEdges[1]);
-        const auto ap2 = dsp::butterworthAllpass (2, fs, stereoEdges[2]);
+        std::vector<dsp::Coeffs> ap0 = dsp::butterworthAllpass (1, fs, stereoEdges[1]);
+        const auto ap2 = dsp::butterworthAllpass (1, fs, stereoEdges[2]);
         ap0.insert (ap0.end(), ap2.begin(), ap2.end());
         stereoAp[(size_t) ch][0].setSections (ap0);
         stereoAp[(size_t) ch][1].setSections (ap2);
@@ -149,6 +162,7 @@ void TapAnalyzer::reset()
         std::fill (peak[(size_t) c].begin(), peak[(size_t) c].end(), 0.0f);
         std::fill (frame[(size_t) c].begin(), frame[(size_t) c].end(), 0.0f);
         std::fill (sum[(size_t) c].begin(), sum[(size_t) c].end(), 0.0);
+        avgFrames[(size_t) c] = ~0ull;
         std::fill (lowAvg[(size_t) c].begin(), lowAvg[(size_t) c].end(), 0.0f);
         std::fill (lowFrame[(size_t) c].begin(), lowFrame[(size_t) c].end(), 0.0f);
         std::fill (lowSum[(size_t) c].begin(), lowSum[(size_t) c].end(), 0.0);
@@ -213,7 +227,7 @@ void TapAnalyzer::process (const float* left, const float* right, int numSamples
         ringR[(size_t) ringPos] = r;
         if (++ringPos == n)
             ringPos = 0;
-        if (++fill >= hop)
+        if (++fill >= (lightweight ? 2 * hop : hop))
         {
             fill = 0;
             analyseFrame();
@@ -358,7 +372,6 @@ void TapAnalyzer::analyseFrame()
             const auto pc = (float) p[ch];
             frame[(size_t) ch][(size_t) k] = pc;
             sum[(size_t) ch][(size_t) k] += p[ch];
-            avg[(size_t) ch][(size_t) k] = (float) (sum[(size_t) ch][(size_t) k] / (double) frames);
             peak[(size_t) ch][(size_t) k] = std::max (peak[(size_t) ch][(size_t) k], pc);
         }
 
