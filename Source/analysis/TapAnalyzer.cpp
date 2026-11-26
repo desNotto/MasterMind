@@ -563,6 +563,11 @@ void powerToDisplay (const std::vector<float>& power, double fs, int fftSize, co
     const double width = octaves[std::clamp (smoothing, 0, 4)];
     const int bins = (int) power.size();
     outDb.resize (freqs.size());
+    if (bins < 2 || fs <= 0.0 || fftSize <= 0) // analyzer not prepared yet
+    {
+        std::fill (outDb.begin(), outDb.end(), -120.0f);
+        return;
+    }
 
     // prefix sums for fast band averages
     static thread_local std::vector<double> prefix;

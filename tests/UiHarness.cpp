@@ -112,6 +112,28 @@ int main (int argc, char** argv)
     const juce::File outDir = argc > 1 ? juce::File (juce::String (argv[1])) : juce::File::getCurrentWorkingDirectory().getChildFile ("ui-snapshots");
     outDir.createDirectory();
 
+    // like pluginval's Editor test: open and close the editor before any audio was prepared
+    {
+        MasterMindProcessor fresh;
+        for (int i = 0; i < 2; ++i)
+        {
+            std::unique_ptr<juce::AudioProcessorEditor> e (fresh.createEditor());
+            e->setSize (1280, 800);
+            for (int k = 0; k < 10; ++k)
+            {
+                juce::MessageManager::getInstance()->runDispatchLoopUntil (35);
+                dynamic_cast<MasterMindEditor*> (e.get())->forceUpdate();
+            }
+            for (const char* tab : { "Eyes", "Low-End", "Stereo", "Spectrogram", "Album", "Master" })
+            {
+                dynamic_cast<MasterMindEditor*> (e.get())->showTab (tab);
+                dynamic_cast<MasterMindEditor*> (e.get())->forceUpdate();
+                (void) e->createComponentSnapshot (e->getLocalBounds(), true, 0.5f);
+            }
+        }
+        std::printf ("unprepared editor: ok\n");
+    }
+
     MasterMindProcessor proc;
     proc.setPlayConfigDetails (2, 2, 48000.0, 512);
     proc.prepareToPlay (48000.0, 512);
