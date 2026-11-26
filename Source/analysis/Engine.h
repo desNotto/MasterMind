@@ -2,6 +2,7 @@
 
 #include "analysis/Checks.h"
 #include "analysis/TapAnalyzer.h"
+#include "reference/TrackAnalysis.h"
 
 #include <juce_core/juce_core.h>
 
@@ -104,6 +105,11 @@ public:
     // published for monitoring (loudness-matched A/B and reference matching)
     std::atomic<float> inShortTermLufs { -100.0f }, outShortTermLufs { -100.0f }, outIntegratedLufs { -100.0f };
 
+    /** Passport of the OUT tap since the last reset (album, spec 7.4). Any thread except audio. */
+    reference::TrackAnalysis makePassport (const juce::String& trackName);
+    /** Normalised average OUT spectrum for reference comparisons and Match EQ. */
+    std::vector<float> outSpectrumNormalised();
+
     void setTargets (const Targets& t);
     Targets getTargets() const;
     void setThresholds (const Thresholds& t);
@@ -124,6 +130,7 @@ private:
     TapAnalyzer inTap, outTap;
     GrHistogram clipHist, limHist;
     int samplesToSecond = 0, currentOrder = 13;
+    uint64_t samplesSinceReset = 0;
     std::vector<float> rtIn, rtOut;
     double lastBuild = 0.0;
 

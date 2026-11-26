@@ -107,6 +107,22 @@ void Engine::push (const float* inL, const float* inR, const float* outL, const 
     fifo.finishedWrite (written);
 }
 
+reference::TrackAnalysis Engine::makePassport (const juce::String& trackName)
+{
+    const juce::ScopedLock sl (prepareLock);
+    auto p = reference::fromAnalyzer (outTap, (double) samplesSinceReset / fs);
+    const auto& h = outTap.loudness().shortTermHistory();
+    p.shortTerm.assign (h.begin(), h.end());
+    p.name = trackName;
+    return p;
+}
+
+std::vector<float> Engine::outSpectrumNormalised()
+{
+    const juce::ScopedLock sl (prepareLock);
+    return reference::normalisedSpectrum (outTap);
+}
+
 void Engine::setTargets (const Targets& t)
 {
     const juce::SpinLock::ScopedLockType sl (targetLock);
@@ -148,6 +164,7 @@ void Engine::run()
                 }
                 if (resetRequested.exchange (false))
                 {
+                    samplesSinceReset = 0;
                     inTap.reset();
                     outTap.reset();
                     clipHist.reset();
@@ -190,6 +207,7 @@ void Engine::run()
 
                     inTap.process (inL.data(), inR.data(), n);
                     outTap.process (outL.data(), outR.data(), n);
+                    samplesSinceReset += (uint64_t) n;
                     samplesToSecond += n;
                     while (samplesToSecond >= (int) fs)
                     {

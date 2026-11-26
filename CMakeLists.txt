@@ -78,6 +78,7 @@ endfunction()
 set(MM_COMMON_DEFINITIONS
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
+    JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_DISPLAY_SPLASH_SCREEN=0)
 
 # ---------------------------------------------------------------------------

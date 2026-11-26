@@ -145,6 +145,7 @@ void LoudnessMeter::reset()
     sumSquares = 0.0;
     samples = overs = tpOvers = 0;
     history.clear();
+    fullHistory.clear();
 }
 
 void LoudnessMeter::process (const float* left, const float* right, int numSamples)
@@ -215,6 +216,8 @@ void LoudnessMeter::finishSubBlock()
     }
 
     history.push_back ((float) shortTermLufs);
+    if (keepFull)
+        fullHistory.push_back ((float) shortTermLufs);
     while (history.size() > 600) // 60 s at 10 Hz
         history.pop_front();
 }

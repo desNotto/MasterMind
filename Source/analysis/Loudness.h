@@ -68,6 +68,10 @@ public:
     /** Short-term history: one value per 100 ms, newest last (for the history graph). */
     const std::deque<float>& shortTermHistory() const { return history; }
 
+    /** Keeps every short-term value since reset (offline analysis of whole files). */
+    void setKeepFullHistory (bool keep) { keepFull = keep; }
+    const std::vector<float>& shortTermFullHistory() const { return fullHistory; }
+
     static double kWeightedOffset() { return -0.691; }
 
 private:
@@ -91,6 +95,8 @@ private:
     uint64_t samples = 0, overs = 0, tpOvers = 0;
     double tpCeiling = 1.0;
     std::deque<float> history;
+    std::vector<float> fullHistory;
+    bool keepFull = false;
 };
 
 /** BS.1770 K-weighting coefficients for any sample rate (exposed for tests). */

@@ -267,7 +267,7 @@ void TapAnalyzer::process (const float* left, const float* right, int numSamples
             accumulate (stereoAcc[(size_t) b], bl[b], br[b]);
         accumulate (broad, l, r);
 
-        if (++scopeCounter >= scopeDecim)
+        if (! lightweight && ++scopeCounter >= scopeDecim)
         {
             scopeCounter = 0;
             scope[(size_t) scopePos] = { (float) m, (float) s };
@@ -298,12 +298,15 @@ void TapAnalyzer::process (const float* left, const float* right, int numSamples
         }
 
         // spectrogram (mid)
-        sgRing[(size_t) sgRingPos] = (float) m;
-        sgRingPos = (sgRingPos + 1) % sgN;
-        if (++sgFill >= sgHop)
+        if (! lightweight)
         {
-            sgFill = 0;
-            analyseSpectrogramFrame();
+            sgRing[(size_t) sgRingPos] = (float) m;
+            sgRingPos = (sgRingPos + 1) % sgN;
+            if (++sgFill >= sgHop)
+            {
+                sgFill = 0;
+                analyseSpectrogramFrame();
+            }
         }
 
         // one-second buckets for "last 10 s" and the harshness history

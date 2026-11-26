@@ -53,6 +53,9 @@ public:
     void reset();
     void process (const float* left, const float* right, int numSamples);
 
+    /** Offline mode: skips the spectrogram, vectorscope and waveform, keeps the full loudness history. */
+    void setLightweight (bool light) { lightweight = light; meter.setKeepFullHistory (light); }
+
     // ---- Loudness (5.3) --------------------------------------------------------------------------
     LoudnessMeter& loudness() { return meter; }
     const LoudnessMeter& loudness() const { return meter; }
@@ -193,6 +196,7 @@ private:
     std::array<std::pair<int, int>, spectrogramBins> sgBinRanges {};
     std::deque<std::array<float, spectrogramBins>> specgram;
     uint64_t sgTotal = 0;
+    bool lightweight = false;
 };
 
 /** Converts per-bin power of an FFT into display points on a log frequency axis, with
