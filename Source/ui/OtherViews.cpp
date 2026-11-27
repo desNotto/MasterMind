@@ -436,7 +436,7 @@ AlbumView::AlbumView (Context& c) : ctx (c)
     setTip (openAlbum, "t:Open album\nOpens an existing album file.");
     newAlbum.onClick = [this]
     {
-        chooser = std::make_unique<juce::FileChooser> ("New album", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Album.mastermind-album"), "*.mastermind-album");
+        chooser = std::make_unique<juce::FileChooser> ("New album", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Album.mastermind-album"), "*.mastermind-album", true, false, getTopLevelComponent());
         chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting, [this] (const juce::FileChooser& fc)
         {
             juce::String err;
@@ -448,7 +448,7 @@ AlbumView::AlbumView (Context& c) : ctx (c)
     };
     openAlbum.onClick = [this]
     {
-        chooser = std::make_unique<juce::FileChooser> ("Open album", juce::File(), "*.mastermind-album");
+        chooser = std::make_unique<juce::FileChooser> ("Open album", juce::File(), "*.mastermind-album", true, false, getTopLevelComponent());
         chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this] (const juce::FileChooser& fc)
         {
             juce::String err;

@@ -6,6 +6,7 @@ Every visual change starts here (see `CLAUDE.md`, "Visual changes: mockup first"
 
 | Version | Date | Status | What changed |
 | --- | --- | --- | --- |
+| [m1-main-window-v12](m1-main-window-v12-2026-11-27/) | 2026-11-27 | Proposed, awaiting approval | v11 plus: graphical Stereo editor (width per band vs your mix and the reference, vectorscope, correlation with the guard threshold) with tooltips; Saturation band Solo and Mute; Multiband tooltips with advice per band (`view=mbtips`) and whole-number values; Auto match over all ten modules |
 | [m1-main-window-v11](m1-main-window-v11-2026-11-27/) | 2026-11-27 | Approved 2026-11-27, implemented in 0.7 | v10 plus: References tab (library folder, song list with slot 1-6 assignment, removal, drop zone), a guide panel on the Album tab, an experimental Auto match strip on Eyes (reference name, progress band by band, Stop, Undo) |
 | [m1-main-window-v10](m1-main-window-v10-2026-11-27/) | 2026-11-27 | Approved with v11 | v9 without the Monitor block in the top bar (correction, system emulation, listen menu). A red MONITOR ON badge appears only while reference B or a band listen plays |
 | [m1-main-window-v9](m1-main-window-v9-2026-11-26/) | 2026-11-26 | Approved 2026-11-27, superseded by v11 | v8 plus: the Dynamic EQ editor repeats the band panel (Freq with the note, Gain or Slope, Q, Snap, Delete as typed fields; On, type, placement and Dynamic work there too); EQ points stay inside the graph |

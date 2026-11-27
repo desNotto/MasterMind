@@ -410,7 +410,7 @@ void TopBar::showPresetMenu()
         }
         else if (r == 30001)
         {
-            chooser = std::make_unique<juce::FileChooser> ("Import preset", juce::File(), "*.mbpreset");
+            chooser = std::make_unique<juce::FileChooser> ("Import preset", juce::File(), "*.mbpreset", true, false, getTopLevelComponent());
             chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this] (const juce::FileChooser& fc)
             {
                 juce::String err2;
@@ -420,7 +420,7 @@ void TopBar::showPresetMenu()
         }
         else if (r == 30002)
         {
-            chooser = std::make_unique<juce::FileChooser> ("Export preset", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (ctx.presets.currentName() + ".mbpreset"), "*.mbpreset");
+            chooser = std::make_unique<juce::FileChooser> ("Export preset", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (ctx.presets.currentName() + ".mbpreset"), "*.mbpreset", true, false, getTopLevelComponent());
             chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting, [this] (const juce::FileChooser& fc)
             {
                 juce::String err2;
@@ -477,7 +477,7 @@ void TopBar::selectRef (int slot)
 
 void TopBar::loadRefFile (int slot)
 {
-    chooser = std::make_unique<juce::FileChooser> ("Load reference " + juce::String (slot + 1), juce::File(), "*.wav;*.flac;*.mp3;*.ogg;*.aif;*.aiff");
+    chooser = std::make_unique<juce::FileChooser> ("Load reference " + juce::String (slot + 1), juce::File(), "*.wav;*.flac;*.mp3;*.ogg;*.aif;*.aiff", true, false, getTopLevelComponent());
     chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this, slot] (const juce::FileChooser& fc)
     {
         if (fc.getResult().existsAsFile())

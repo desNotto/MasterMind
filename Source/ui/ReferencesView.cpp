@@ -308,13 +308,13 @@ ReferencesView::ReferencesView (Context& c) : ctx (c)
     setTip (open, "c:lib.open");
     add.onClick = [this]
     {
-        chooser = std::make_unique<juce::FileChooser> ("Add reference files", juce::File(), audioWildcard);
+        chooser = std::make_unique<juce::FileChooser> ("Add reference files", juce::File(), audioWildcard, true, false, getTopLevelComponent());
         chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::canSelectMultipleItems,
                               [this] (const juce::FileChooser& fc) { addFiles (fc.getResults()); });
     };
     change.onClick = [this]
     {
-        chooser = std::make_unique<juce::FileChooser> ("Reference library folder", folder());
+        chooser = std::make_unique<juce::FileChooser> ("Reference library folder", folder(), {}, true, false, getTopLevelComponent());
         chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories, [this] (const juce::FileChooser& fc)
         {
             if (fc.getResult().isDirectory())
