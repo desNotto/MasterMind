@@ -6,6 +6,7 @@ Every visual change starts here (see `CLAUDE.md`, "Visual changes: mockup first"
 
 | Version | Date | Status | What changed |
 | --- | --- | --- | --- |
+| [m1-main-window-v13](m1-main-window-v13-2026-11-27/) | 2026-11-27 | Proposed, awaiting approval | v12 plus: graphical Low-End editor (low spectrum with the mono zone and the rotator frequency, phase dial with the waveform before and after, translator harmonics), tooltip advice on every knob (18 new texts, `view=newtips`), knob tooltips without the module section |
 | [m1-main-window-v12](m1-main-window-v12-2026-11-27/) | 2026-11-27 | Approved 2026-11-27, implemented in 0.7 | v11 plus: graphical Stereo editor (width per band vs your mix and the reference, vectorscope, correlation with the guard threshold) with tooltips; Saturation band Solo and Mute; Multiband tooltips with advice per band (`view=mbtips`) and whole-number values; Auto match over all ten modules |
 | [m1-main-window-v11](m1-main-window-v11-2026-11-27/) | 2026-11-27 | Approved 2026-11-27, superseded by v12 | v10 plus: References tab (library folder, song list with slot 1-6 assignment, removal, drop zone), a guide panel on the Album tab, an experimental Auto match strip on Eyes (reference name, progress band by band, Stop, Undo) |
 | [m1-main-window-v10](m1-main-window-v10-2026-11-27/) | 2026-11-27 | Approved with v11 | v9 without the Monitor block in the top bar (correction, system emulation, listen menu). A red MONITOR ON badge appears only while reference B or a band listen plays |
