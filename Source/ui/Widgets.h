@@ -66,6 +66,11 @@ public:
     void updateMeter();
     bool hasRing() const noexcept { return (bool) meterLevel; }
 
+    /** Whole-number steps (mockup v12): the value moves in steps of `valueStep` in the
+        parameter's own units, and `formatter` prints it (both optional). */
+    float valueStep = 0.0f;
+    std::function<juce::String (float)> formatter;
+
     /** Dial diameter (32 by default; the saturation Drive knob is larger). */
     void setDialSize (float px) { dial = px; repaint(); }
     float preferredHeight() const noexcept { return dial + 32.0f; }
@@ -91,6 +96,7 @@ private:
     bool bipolar;
     juce::Point<float> lastDrag;
     bool dragging = false;
+    float dragNorm = 0.0f;
     std::unique_ptr<juce::ParameterAttachment> attachment;
     std::unique_ptr<juce::TextEditor> editor;
     juce::Rectangle<int> valueArea;

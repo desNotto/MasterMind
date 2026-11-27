@@ -2,6 +2,7 @@
 #include "ui/Locale.h"
 
 #include "dsp/SatStereo.h"
+#include "ui/EyesView.h"
 #include "state/Parameters.h"
 
 #include <algorithm>
@@ -924,6 +925,24 @@ public:
                                                                               { "mix", "Mix", false }, { "link", "Link", false }, { "trim", "Trim", true } };
         for (const auto& [field, label, bi] : fields)
             ks.push_back (&mk (*this, params::mb (band, field), label, "mb." + juce::String (label).toLowerCase(), col::orange, bi));
+        // whole-number steps (mockup v12); Ratio keeps 0.5 steps so that 1.5:1 stays possible
+        static const float stepOf[] = { 1.0f, 0.5f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+        for (int i = 0; i < 9; ++i)
+        {
+            auto* k = ks[(size_t) i];
+            k->getProperties().set ("band", band - 1);
+            k->valueStep = stepOf[i];
+        }
+        const auto whole = [] (const char* unit) { return [unit] (float v) { return fmtMinus (v, 0) + unit; }; };
+        const auto signedWhole = [] (float v) { return (std::abs (v) < 0.5f ? juce::String ("0") : fmtSigned (v, 0)) + " dB"; };
+        ks[0]->formatter = whole (" dB");
+        ks[1]->formatter = [] (float v) { return (std::abs (v - std::round (v)) < 0.01f ? juce::String (juce::roundToInt (v)) : juce::String (v, 1)) + ":1"; };
+        ks[2]->formatter = signedWhole;
+        ks[3]->formatter = whole (" ms");
+        ks[5]->formatter = whole (" dB");
+        ks[6]->formatter = whole ("%");
+        ks[7]->formatter = whole ("%");
+        ks[8]->formatter = signedWhole;
         ks[0]->meterLevel = [this]
         {
             if (ctx.param ("mb_on") < 0.5f || ctx.param (params::mb (band, "bypass")) >= 0.5f)
@@ -932,7 +951,7 @@ public:
             return v <= -99.0f ? noSignal() : v;
         };
         auto* rel = ks[4];
-        rel->textOverride = [this, rel] { return ctx.param (params::mb (band, "rel_auto")) >= 0.5f ? juce::String ("Auto") : ctx.apvts.getParameter (rel->getParamId())->getCurrentValueAsText(); };
+        rel->textOverride = [this] { return ctx.param (params::mb (band, "rel_auto")) >= 0.5f ? juce::String ("Auto") : fmtMinus (ctx.param (params::mb (band, "rel")), 0) + " ms"; };
         rel->onUserChange = [this] { ctx.setParam (params::mb (band, "rel_auto"), 0.0f); };
         rel->menuItems.push_back ({ "Auto release", [this] { return ctx.param (params::mb (band, "rel_auto")) >= 0.5f; },
                                     [this] { ctx.setParam (params::mb (band, "rel_auto"), ctx.param (params::mb (band, "rel_auto")) >= 0.5f ? 0.0f : 1.0f); } });
@@ -1149,6 +1168,22 @@ public:
             const auto c = satColours[b];
             g.setColour (c.withAlpha (0.05f));
             g.fillRect (juce::Rectangle<float> (x0, 0.0f, x1 - x0, pb));
+            bool anySolo = false;
+            for (int i = 1; i <= 3; ++i)
+                anySolo = anySolo || ctx.param (params::sat (i, "solo")) >= 0.5f;
+            const bool muted = ctx.param (params::sat (b + 1, "mute")) >= 0.5f, silent = muted || (anySolo && ctx.param (params::sat (b + 1, "solo")) < 0.5f);
+            if (silent)
+            {
+                g.saveState();
+                g.reduceClipRegion (juce::Rectangle<float> (x0, 0.0f, x1 - x0, pb).toNearestInt());
+                g.setColour (juce::Colour (0xff2b313b));
+                for (float k = x0 - pb; k < x1; k += 8.0f)
+                    g.drawLine (k, pb, k + pb, 0.0f, 3.0f);
+                g.restoreState();
+                g.setColour (col::text2);
+                g.setFont (font (11.0f, true));
+                g.drawText (muted ? "MUTED" : "SOLO OFF", juce::Rectangle<float> (x1 - 76.0f, 2.0f, 72.0f, 14.0f), juce::Justification::centredRight);
+            }
             if (! spec.empty() && spec.size() == snap.freqs.size())
             {
                 juce::Path p;
@@ -1390,6 +1425,12 @@ public:
         drive->setDialSize (44.0f);
         drive->getProperties().set ("w", 66);
         asym = &mk (*this, params::sat (b, "bias"), "Asymmetry", "sat.asym", colour, false);
+        for (auto [btn, field, tip] : { std::tuple { &solo, "solo", "c:sat.solo" }, { &mute, "mute", "c:sat.mute" } })
+        {
+            btn->attach (ctx.apvts, params::sat (b, field));
+            setTip (*btn, tip);
+            addAndMakeVisible (*btn);
+        }
         mix = &mk (*this, params::sat (b, "mix"), "Mix", "sat.mix", colour, false);
         out = &mk (*this, params::sat (b, "out"), "Output", "sat.out", colour, true);
     }
@@ -1422,11 +1463,23 @@ public:
         g.drawText ("Drive", h.removeFromRight (38), juce::Justification::centredRight);
         g.drawText (range, h, juce::Justification::centredLeft, true);
     }
+    /** The band is silent: muted, or another band is soloed (D-032). */
+    bool silent() const
+    {
+        bool anySolo = false;
+        for (int i = 1; i <= 3; ++i)
+            anySolo = anySolo || ctx.param (params::sat (i, "solo")) >= 0.5f;
+        return ctx.param (params::sat (band, "mute")) >= 0.5f || (anySolo && ctx.param (params::sat (band, "solo")) < 0.5f);
+    }
     void resized() override
     {
         auto r = getLocalBounds().reduced (8, 0).withTrimmedTop (5).withTrimmedBottom (3);
         if (horizontal)
         {
+            auto sm = r.removeFromRight (24);
+            solo.setBounds (sm.withHeight (20).withY (r.getCentreY() - 22));
+            mute.setBounds (sm.withHeight (20).withY (r.getCentreY() + 2));
+            r.removeFromRight (6);
             r = r.withSizeKeepingCentre (r.getWidth(), std::min (r.getHeight(), 80));
             curve.setBounds (r.removeFromLeft (70).withSizeKeepingCentre (70, 70));
             r.removeFromLeft (10);
@@ -1436,6 +1489,13 @@ public:
             return;
         }
         headArea = r.removeFromTop (18);
+        {
+            auto hb = headArea;
+            mute.setBounds (hb.removeFromRight (22).withSizeKeepingCentre (22, 20));
+            hb.removeFromRight (4);
+            solo.setBounds (hb.removeFromRight (22).withSizeKeepingCentre (22, 20));
+            headArea.removeFromRight (56);
+        }
         r.removeFromTop (4);
         auto body = r.removeFromTop (80);
         curve.setBounds (body.removeFromLeft (80));
@@ -1456,6 +1516,7 @@ public:
     bool horizontal = false;
     TransferCurve curve;
     TypeList types;
+    Btn solo { "S", true }, mute { "M", true };
     Knob *drive = nullptr, *asym = nullptr, *mix = nullptr, *out = nullptr;
     juce::Rectangle<int> headArea;
 };
@@ -1513,6 +1574,7 @@ public:
         {
             c->curve.refresh();
             c->types.repaint();
+            c->setAlpha (c->silent() ? 0.55f : 1.0f);
             c->repaint();
         }
     }
@@ -1539,6 +1601,297 @@ public:
     std::vector<std::unique_ptr<SatCard>> cards;
     int compactBand = 0;
 };
+
+// ---- Stereo (mockup v12) ---------------------------------------------------------------------------------
+/** Width per band: the module's setting (left axis, 0-200 %) against the measured width of your mix and
+    of the reference (right axis, analysis width 0-100 %, D-033). Drag a band for its width, the yellow
+    handle for the split frequency. */
+class StGraph final : public juce::Component
+{
+public:
+    explicit StGraph (Context& c) : ctx (c) { setTip (*this, "c:st.graph"); }
+    float xOf (double f) const { return (float) (std::log (f / 20.0) / std::log (1000.0)) * getWidth(); }
+    double fOf (float x) const { return 20.0 * std::pow (1000.0, juce::jlimit (0.0, 1.0, (double) x / getWidth())); }
+    float pb() const { return getHeight() - 14.0f; }
+    float ySetting (float w) const { return pb() - w / 200.0f * (pb() - 16.0f); }
+    float yMeasured (double w) const { return pb() - (float) juce::jlimit (0.0, 100.0, w) / 100.0f * (pb() - 16.0f); }
+    float lowSplit() const { return ctx.param ("lem_on") >= 0.5f && ctx.param ("lem_mono_on") >= 0.5f ? ctx.param ("lem_mono_freq") : 120.0f; }
+
+    /** Measured widths: zone 1 (mid) averages the 150-500 Hz and 0.5-4 kHz analysis bands, zone 2 (high) is > 4 kHz. */
+    std::pair<double, double> measured (const std::array<analysis::TapAnalyzer::StereoBand, analysis::numStereoBands>& b) const
+    {
+        return { 0.5 * (b[1].widthPercent + b[2].widthPercent), b[3].widthPercent };
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto r = getLocalBounds().toFloat();
+        g.setColour (col::sunk);
+        g.fillRoundedRectangle (r, 6.0f);
+        const float bottom = pb();
+        g.setFont (font (11.0f));
+        for (double f : { 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 })
+        {
+            const float x = xOf (f);
+            g.setColour (juce::Colour (0xff1b1f26));
+            g.drawVerticalLine ((int) x, 0.0f, bottom);
+            g.setColour (col::text3);
+            g.drawText (f >= 1000.0 ? juce::String ((int) (f / 1000.0)) + "k" : juce::String ((int) f), juce::Rectangle<float> (x + 3, bottom, 30, 14), juce::Justification::centredLeft);
+        }
+        const float dash[] = { 3.0f, 4.0f };
+        g.setColour (col::line2);
+        g.drawDashedLine (juce::Line<float> (0.0f, ySetting (100.0f), (float) getWidth(), ySetting (100.0f)), dash, 2, 1.0f);
+        g.setColour (col::text3);
+        g.drawText ("100% (no change)", juce::Rectangle<float> (4.0f, ySetting (100.0f) - 15.0f, 120.0f, 13.0f), juce::Justification::centredLeft);
+
+        const float split = ctx.param ("st_split_freq"), lo = lowSplit();
+        const float edges[4] = { 20.0f, lo, split, 20000.0f };
+        // low zone: mono below the Low-End frequency
+        g.setColour (juce::Colour (0xff20252d));
+        g.fillRect (juce::Rectangle<float> (0.0f, 0.0f, xOf (lo), bottom));
+        g.setColour (col::text3);
+        g.drawText ("mono", juce::Rectangle<float> (6.0f, 4.0f, 60.0f, 14.0f), juce::Justification::centredLeft);
+
+        const bool sig = ctx.snap.out.hasSignal;
+        const auto mix = measured (ctx.snap.out.bandsShort);
+        const auto t = ctx.refs.target();
+        const bool hasRef = t.count > 0;
+        const std::pair<double, double> ref { 0.5 * (t.width[1] + t.width[2]), t.width[3] };
+        const juce::Colour colours[2] = { juce::Colour (0xff4fc6e0), juce::Colour (0xffb78cff) };
+        static const char* names[] = { "Mid", "High" };
+        for (int z = 0; z < 2; ++z)
+        {
+            const float x0 = xOf (edges[z + 1]), x1 = xOf (edges[z + 2]);
+            const auto c = colours[z];
+            const float w = ctx.param (z == 0 ? "st_mid_width" : "st_high_width");
+            const double now = z == 0 ? mix.first : mix.second, rw = z == 0 ? ref.first : ref.second;
+            g.setColour (c.withAlpha (0.05f));
+            g.fillRect (juce::Rectangle<float> (x0, 0.0f, x1 - x0, bottom));
+            if (sig)
+            {
+                const float yn = yMeasured (now);
+                g.setColour (juce::Colour (0xff8b93a1).withAlpha (0.22f));
+                g.fillRect (juce::Rectangle<float> (x0 + 6, yn, x1 - x0 - 12, bottom - yn));
+            }
+            const float y = ySetting (w);
+            g.setColour (c.withAlpha (0.14f));
+            g.fillRect (juce::Rectangle<float> (x0 + 4, y, x1 - x0 - 8, bottom - y));
+            g.setColour (c);
+            g.drawLine (x0 + 4, y, x1 - 4, y, 2.0f);
+            if (hasRef)
+            {
+                g.setColour (col::text);
+                g.drawDashedLine (juce::Line<float> (x0 + 4, yMeasured (rw), x1 - 4, yMeasured (rw)), dash, 2, 1.3f);
+            }
+            const float cx = (x0 + x1) / 2;
+            g.setColour (c);
+            g.fillEllipse (cx - 6, y - 6, 12, 12);
+            g.setColour (col::sunk);
+            g.drawEllipse (cx - 6, y - 6, 12, 12, 2.0f);
+            juce::String full = juce::String (names[z]) + " " + juce::String (juce::roundToInt (w)) + "%";
+            if (sig)
+                full << juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 mix ")) << juce::String (juce::roundToInt (now)) << "%";
+            if (hasRef)
+                full << juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ref ")) << juce::String (juce::roundToInt (rw)) << "%";
+            auto label = full;
+            float lw = juce::GlyphArrangement::getStringWidth (font (11.5f, true), label) + 14.0f;
+            if (lw > x1 - x0 - 4)
+            {
+                label = juce::String (names[z]) + " " + juce::String (juce::roundToInt (w)) + "%";
+                lw = juce::GlyphArrangement::getStringWidth (font (11.5f, true), label) + 14.0f;
+            }
+            const float px = juce::jmax (x0 + 2, juce::jmin (x1 - lw - 2, cx - lw / 2));
+            const juce::Rectangle<float> pill (px, juce::jmax (1.0f, y - 25.0f), lw, 17.0f);
+            g.setColour (col::sunk);
+            g.fillRoundedRectangle (pill, 4.0f);
+            g.setColour (c);
+            g.drawRoundedRectangle (pill, 4.0f, 1.0f);
+            g.setFont (font (11.5f, true));
+            g.drawText (label, pill, juce::Justification::centred, true);
+        }
+        // split handle
+        const float xs = xOf (split);
+        g.setColour (col::yellow);
+        g.fillRect (xs - 1.0f, 0.0f, 2.0f, bottom);
+        const auto st = hzText (split);
+        const float sw = juce::GlyphArrangement::getStringWidth (font (11.5f, true), st) + 12.0f;
+        const juce::Rectangle<float> pill (xs - sw / 2, bottom - 18.0f, sw, 16.0f);
+        g.fillRoundedRectangle (pill, 4.0f);
+        g.setColour (juce::Colour (0xff1b1600));
+        g.setFont (font (11.5f, true));
+        g.drawText (st, pill, juce::Justification::centred);
+        // legend
+        auto lg = juce::Rectangle<float> ((float) getWidth() - 214.0f, 6.0f, 208.0f, 20.0f);
+        g.setColour (col::sunk);
+        g.fillRoundedRectangle (lg, 4.0f);
+        g.setColour (col::line);
+        g.drawRoundedRectangle (lg, 4.0f, 1.0f);
+        g.setFont (font (11.0f));
+        auto item = [&] (float x, juce::Colour c, const char* t, int kind)
+        {
+            g.setColour (c);
+            if (kind == 2)
+                g.drawDashedLine (juce::Line<float> (lg.getX() + x, lg.getCentreY(), lg.getX() + x + 14.0f, lg.getCentreY()), dash, 2, 1.2f);
+            else
+                g.fillRect (juce::Rectangle<float> (lg.getX() + x, lg.getCentreY() - (kind == 1 ? 3.0f : 2.0f), 14.0f, kind == 1 ? 6.0f : 4.0f));
+            g.setColour (col::text2);
+            g.drawText (t, juce::Rectangle<float> (lg.getX() + x + 18.0f, lg.getY(), 56.0f, lg.getHeight()), juce::Justification::centredLeft);
+        };
+        item (8.0f, colours[0], "module", 0);
+        item (74.0f, juce::Colour (0xff8b93a1).withAlpha (0.6f), "your mix", 1);
+        item (144.0f, col::text, "reference", 2);
+        g.setColour (col::line);
+        g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+    }
+
+    int hit (juce::Point<float> p, bool& isSplit) const
+    {
+        isSplit = std::abs (p.x - xOf (ctx.param ("st_split_freq"))) < 6.0f;
+        if (isSplit)
+            return 1;
+        if (p.x > xOf (lowSplit()) && p.x < xOf (ctx.param ("st_split_freq")))
+            return 1;
+        if (p.x > xOf (ctx.param ("st_split_freq")))
+            return 2;
+        return 0;
+    }
+    juce::String idFor (int z, bool split) const { return split ? juce::String ("st_split_freq") : juce::String (z == 1 ? "st_mid_width" : "st_high_width"); }
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        bool split = false;
+        const int z = hit (e.position, split);
+        setMouseCursor (z == 0 ? juce::MouseCursor::NormalCursor : (split ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::UpDownResizeCursor));
+    }
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        zone = hit (e.position, splitDrag);
+        if (zone > 0)
+        {
+            ctx.apvts.getParameter (idFor (zone, splitDrag))->beginChangeGesture();
+            mouseDrag (e);
+        }
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (zone <= 0)
+            return;
+        auto* p = ctx.apvts.getParameter (idFor (zone, splitDrag));
+        const float v = splitDrag ? (float) juce::jlimit (1000.0, 10000.0, fOf (e.position.x))
+                                  : juce::jlimit (0.0f, 200.0f, std::round ((pb() - e.position.y) / (pb() - 16.0f) * 200.0f));
+        p->setValueNotifyingHost (p->convertTo0to1 (v));
+        repaint();
+    }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (zone > 0)
+            ctx.apvts.getParameter (idFor (zone, splitDrag))->endChangeGesture();
+        zone = 0;
+    }
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        bool split = false;
+        const int z = hit (e.position, split);
+        if (z > 0 && ! split)
+            ctx.setParam (idFor (z, false), 100.0f); // double-click: back to 100 % (no change)
+    }
+    Context& ctx;
+    int zone = 0;
+    bool splitDrag = false;
+};
+
+/** Vectorscope and correlation with the guard threshold. */
+class StScope final : public juce::Component
+{
+public:
+    explicit StScope (Context& c) : ctx (c) {}
+    void paint (juce::Graphics& g) override
+    {
+        auto r = getLocalBounds().toFloat();
+        const float sz = std::min (r.getWidth(), r.getHeight() - 64.0f);
+        scope = juce::Rectangle<float> (r.getX(), r.getY(), sz, sz);
+        g.setColour (col::sunk);
+        g.fillRoundedRectangle (scope, 6.0f);
+        drawVectorscope (g, scope.reduced (4.0f), ctx.snap.out.scope);
+        g.setColour (col::line);
+        g.drawRoundedRectangle (scope.reduced (0.5f), 6.0f, 1.0f);
+        auto c = r.withTrimmedTop (sz + 10.0f);
+        corr = c;
+        const double now = ctx.snap.out.broadShort.correlation;
+        g.setColour (col::text3);
+        g.setFont (font (12.0f));
+        g.drawText ("Correlation", c.removeFromTop (16.0f), juce::Justification::centredLeft);
+        g.setColour (col::text);
+        g.setFont (font (13.0f, true));
+        g.drawText (fmtSigned (now, 2), juce::Rectangle<float> (c.getX(), c.getY() - 16.0f, c.getWidth(), 16.0f), juce::Justification::centredRight);
+        auto bar = c.removeFromTop (18.0f).reduced (0.0f, 1.0f);
+        drawCorrelation (g, bar, now);
+        const float thr = ctx.param ("st_guard_thr");
+        const float gx = bar.getX() + (thr + 1.0f) / 2.0f * bar.getWidth();
+        g.setColour (juce::Colours::white);
+        g.fillRect (gx - 1.0f, bar.getY() - 3.0f, 2.0f, bar.getHeight() + 6.0f);
+        g.setColour (col::text3);
+        g.setFont (font (11.5f));
+        g.drawText (minusSign() + "1", c.withHeight (16.0f), juce::Justification::centredLeft);
+        g.drawText ("+1", c.withHeight (16.0f), juce::Justification::centredRight);
+        g.drawText ((ctx.param ("st_guard_on") >= 0.5f ? "guard " : "guard off ") + fmtSigned (thr, 2), c.withHeight (16.0f), juce::Justification::centred);
+    }
+    void mouseMove (const juce::MouseEvent& e) override { setTip (*this, scope.contains (e.position) ? "c:st.scope" : (corr.contains (e.position) ? "c:st.corr" : juce::String())); }
+    Context& ctx;
+    juce::Rectangle<float> scope, corr;
+};
+
+class StereoEditor final : public ModuleEditor
+{
+public:
+    explicit StereoEditor (Context& c) : ModuleEditor (c, 6, "width per band and the correlation guard, drag a band up or down"), graph (c), scope (c)
+    {
+        guard.attach (ctx.apvts, "st_guard_on");
+        setTip (guard, "t:Correlation guard\nReduces the stereo width when the correlation falls below the threshold.");
+        addRight (guard, 136);
+        addAndMakeVisible (graph);
+        addAndMakeVisible (scope);
+        row.push_back (&makeKnob (*this, "st_mid_width", "Mid width", "st.mid", col::orange));
+        row.push_back (&makeKnob (*this, "st_high_width", "High width", "st.high", col::orange));
+        row.push_back (&makeKnob (*this, "st_split_freq", "Split", "st.split", col::yellow));
+        row.push_back (&makeKnob (*this, "st_ms_balance", "M/S bal.", "st.bal", col::orange, true));
+        auto& g = makeKnob (*this, "st_guard_thr", "Guard thr", "st.guard", col::orange, true);
+        g.meterInverse = true;
+        g.meterLevel = [this]
+        {
+            if (ctx.param ("st_on") < 0.5f || ctx.param ("st_guard_on") < 0.5f)
+                return noSignal();
+            const float v = ctx.proc.getChain().getStereo().guardCorrelation();
+            return v > 1.5f ? noSignal() : v;
+        };
+        row.push_back (&g);
+    }
+    int naturalHeight (int) const override { return compact ? headH + 8 + 120 + 8 + knobH + 8 : headH + 8 + 176 + 8 + knobH + 8; }
+    void update() override
+    {
+        ModuleEditor::update();
+        graph.repaint();
+        scope.repaint();
+    }
+    void layoutBody (juce::Rectangle<int> r) override
+    {
+        auto top = r.removeFromTop (compact ? 120 : 176);
+        if (! compact)
+        {
+            scope.setBounds (top.removeFromRight (236));
+            top.removeFromRight (10);
+            scope.setVisible (true);
+        }
+        else
+            scope.setVisible (false);
+        graph.setBounds (top);
+        r.removeFromTop (8);
+        layoutKnobRow (r.removeFromTop (knobH), row);
+    }
+    StGraph graph;
+    StScope scope;
+    Btn guard { "Correlation guard", true };
+    std::vector<Knob*> row;
+};
 } // namespace
 
 // ==================================================================================================
@@ -1550,6 +1903,7 @@ std::unique_ptr<ModuleEditor> createModuleEditor (Context& ctx, int index)
         case 1: return std::make_unique<EqEditor> (ctx);
         case 2: return std::make_unique<MultibandEditor> (ctx);
         case 5: return std::make_unique<SaturationEditor> (ctx);
+        case 6: return std::make_unique<StereoEditor> (ctx);
         default: break;
     }
     std::unique_ptr<GenericEditor> e;
@@ -1608,24 +1962,6 @@ std::unique_ptr<ModuleEditor> createModuleEditor (Context& ctx, int index)
             setTip (model, "c:bc.model");
             e->addRight (model, 110);
             e->history ([&chain] { return chain.getBusComp().gainReductionDb(); }, 6.0f, "typical: 1-2 dB");
-            break;
-        }
-        case 6:
-        {
-            e = std::make_unique<GenericEditor> (ctx, 6, "width per band and the correlation guard", orange,
-                                                 std::vector<KSpec> { { "st_mid_width", "Mid width", "st.mid" }, { "st_high_width", "High width", "st.high" }, { "st_split_freq", "Split", "" },
-                                                                      { "st_ms_balance", "M/S bal.", "", true }, { "st_guard_thr", "Guard thr", "st.guard", true } });
-            auto* ed = e.get();
-            auto* guard = e->knob ("st_guard_thr");
-            guard->meterInverse = true;
-            guard->meterLevel = [ed, &chain]
-            {
-                if (ed->ctx.param ("st_on") < 0.5f || ed->ctx.param ("st_guard_on") < 0.5f)
-                    return noSignal();
-                const float v = chain.getStereo().guardCorrelation();
-                return v > 1.5f ? noSignal() : v;
-            };
-            e->toggle ("Correlation guard", "st_guard_on", "t:Correlation guard\nReduces the stereo width when the correlation falls below the threshold.", 136);
             break;
         }
         case 7:

@@ -177,7 +177,13 @@ void Knob::setNorm (float v)
 {
     if (param == nullptr)
         return;
-    attachment->setValueAsPartOfGesture (param->convertFrom0to1 (juce::jlimit (0.0f, 1.0f, v)));
+    float plain = param->convertFrom0to1 (juce::jlimit (0.0f, 1.0f, v));
+    if (valueStep > 0.0f)
+    {
+        const auto range = param->getNormalisableRange();
+        plain = juce::jlimit (range.start, range.end, std::round (plain / valueStep) * valueStep);
+    }
+    attachment->setValueAsPartOfGesture (plain);
     if (onUserChange)
         onUserChange();
 }
@@ -280,7 +286,8 @@ void Knob::paint (juce::Graphics& g)
     g.setColour (col::text);
     g.drawLine (cx, cy, cx + (r - 7) * std::sin (a), cy - (r - 7) * std::cos (a), 2.0f);
 
-    const auto text = textOverride ? textOverride() : (param != nullptr ? param->getCurrentValueAsText() : juce::String());
+    const auto text = textOverride ? textOverride()
+                      : (param == nullptr ? juce::String() : (formatter ? formatter (param->convertFrom0to1 (valueNorm())) : param->getCurrentValueAsText()));
     g.setFont (semibold (12.5f));
     g.setColour (col::text);
     g.drawText (text, juce::Rectangle<float> (0, dial + 3, b.getWidth(), 15), juce::Justification::centred, false);
@@ -316,6 +323,7 @@ void Knob::mouseDown (const juce::MouseEvent& e)
     }
     lastDrag = e.position;
     dragging = true;
+    dragNorm = valueNorm();
     attachment->beginGesture();
 }
 
@@ -326,7 +334,9 @@ void Knob::mouseDrag (const juce::MouseEvent& e)
     const float sens = e.mods.isShiftDown() ? 0.0008f : 0.005f; // Shift: fine adjustment
     const float delta = ((lastDrag.y - e.position.y) + (e.position.x - lastDrag.x) * 0.5f) * sens;
     lastDrag = e.position;
-    setNorm (valueNorm() + delta);
+    // accumulate unrounded, so that whole-number steps still follow slow drags
+    dragNorm = juce::jlimit (0.0f, 1.0f, dragNorm + delta);
+    setNorm (dragNorm);
 }
 
 void Knob::mouseUp (const juce::MouseEvent&)
@@ -353,9 +363,13 @@ void Knob::mouseDoubleClick (const juce::MouseEvent& e)
 
 void Knob::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
 {
-    const float step = (e.mods.isShiftDown() ? 0.002f : 0.02f) * (w.deltaY > 0 ? 1.0f : -1.0f) * (w.isReversed ? -1.0f : 1.0f);
+    const float dir = (w.deltaY > 0 ? 1.0f : -1.0f) * (w.isReversed ? -1.0f : 1.0f);
     attachment->beginGesture();
-    setNorm (valueNorm() + step);
+    if (valueStep > 0.0f && param != nullptr)
+        setNorm (param->convertTo0to1 (juce::jlimit (param->getNormalisableRange().start, param->getNormalisableRange().end,
+                                                     param->convertFrom0to1 (valueNorm()) + dir * valueStep)));
+    else
+        setNorm (valueNorm() + (e.mods.isShiftDown() ? 0.002f : 0.02f) * dir);
     attachment->endGesture();
 }
 
@@ -382,7 +396,10 @@ void Knob::showEditor()
         if (text.isNotEmpty())
         {
             attachment->beginGesture();
-            attachment->setValueAsPartOfGesture (param->getNormalisableRange().snapToLegalValue (value));
+            auto plain = param->getNormalisableRange().snapToLegalValue (value);
+            if (valueStep > 0.0f)
+                plain = param->getNormalisableRange().snapToLegalValue (std::round (plain / valueStep) * valueStep);
+            attachment->setValueAsPartOfGesture (plain);
             attachment->endGesture();
         }
         juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<Knob> (this)] { if (safe) safe->editor.reset(); });
@@ -675,6 +692,14 @@ void fillTip (TipBubble& bubble, const juce::String& tip, juce::Component* sourc
                         if (juce::String (c.id) == (knob->meterInverse ? "thr.ring.inv" : "thr.ring"))
                             s.push_back ({ u ("\xd0\x98\xd0\xbd\xd0\xb4\xd0\xb8\xd0\xba\xd0\xb0\xd1\x82\xd0\xbe\xd1\x80"), u (c.text), false });
                 s.push_back ({ u (k.kind), u (k.tip), u (k.kind) == warning });
+                if (source != nullptr && source->getProperties().contains ("band"))
+                {
+                    const int band = juce::jlimit (0, 4, (int) source->getProperties()["band"]);
+                    static const char* bandNames[] = { "Low", "Lo-mid", "Mid", "Hi-mid", "High" };
+                    for (const auto& a : multibandAdvice())
+                        if (key == a.id)
+                            s.push_back ({ u ("\xd0\x9f\xd0\xbe\xd0\xbb\xd0\xbe\xd1\x81\xd0\xb0 ") + bandNames[band], u (a.perBand[(size_t) band]), false });
+                }
                 bubble.setContent (modName + " \xc2\xb7 " + u (k.label), u (k.range), s,
                                    u ("\xd0\x94\xd0\xb2\xd0\xbe\xd0\xb9\xd0\xbd\xd0\xbe\xd0\xb9 \xd0\xba\xd0\xbb\xd0\xb8\xd0\xba \xe2\x80\x94 \xd1\x81\xd0\xb1\xd1\x80\xd0\xbe\xd1\x81 \xc2\xb7 Shift \xe2\x80\x94 \xd1\x82\xd0\xbe\xd1\x87\xd0\xbd\xd0\xbe"));
                 return;

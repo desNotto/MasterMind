@@ -158,16 +158,30 @@ At the user's request the Monitor block is gone from the top bar: monitor correc
 
 A new tab next to Album keeps reference songs in a library folder (settings.json key `referenceFolder`, default `Documents\MasterMind References`). The list shows the audio files of that folder (WAV, FLAC, MP3, OGG, AIFF). Dropped or added files are copied into the folder in the background (through a temporary `.part` name, the originals stay) and analysed into the same cache as the slots, so assigning a song to a slot 1-6 is instant. Remove moves the file to the Windows Recycle Bin after a confirmation and empties any slot that holds it. Slot assignment uses the existing ReferenceLibrary (project state unchanged). The Album tab shows a guide panel (approved Russian text, ASD-STE100) when the window is at least 900 units wide.
 
-## D-031 Auto match (experimental, mockup v11)
+## D-031 Auto match (experimental, mockups v11 and v12)
 
-A strip at the top of the Eyes tab names the reference (the selected slot, otherwise the first ready slot in the set) and starts Auto match. It works on the live analysis of the OUT tap while the song plays, with an analysis reset and 4 s of signal per measurement:
+A strip at the top of the Eyes tab names the reference (the selected slot, otherwise the first ready slot in the set) and starts Auto match. It works on the live analysis while the song plays, with an analysis reset and 4 s of signal per measurement, and it moves the knobs of all ten modules in signal order (v12):
 
 1. Undo snapshot of every parameter; B is switched off so that our mix is measured.
-2. Dynamic EQ: band 1 low shelf 60 Hz (Sub), bands 2-5 bells at 95 Hz, 270 Hz, 1 kHz, 3.5 kHz (Bass to Presence), band 10 high shelf 8 kHz (Air); dynamic off, placement Stereo, gains start at 0. These bands are overwritten.
-3. Band loop: the lowest band up to the current one that is outside +-0.9 dB of the target is corrected (gain -= 0.85 x deviation, limited to +-12 dB); when all bands up to the current one are green, the next band starts. So after every step the lower bands are checked again, as the user asked. A band that stays out of range after 5 attempts is marked and skipped.
-4. Loudness: Limiter on, ceiling at most -1 dBTP, Drive moves by 0.9 x (reference integrated - measured) until the difference is within 0.5 LU (6 attempts).
-5. Checks: Low-End mono maker (120 Hz) when mono loss or low-band correlation is not green, the resonance suppressor (2-8 kHz, 4 dB) when harshness is not green; then one more pass over the bands if the loudness step moved them.
-6. The strip reports what stays out of range. PLR usually cannot be green together with a much louder level; the report says so.
+2. **Input**: subsonic filter on at 25 Hz; Trim brings the input integrated loudness to about -16 LUFS (gain staging for the dynamics).
+3. **Dynamic EQ**: band 1 low shelf 60 Hz (Sub), bands 2-5 bells at 95 Hz, 270 Hz, 1 kHz, 3.5 kHz (Bass to Presence), band 10 high shelf 8 kHz (Air); these bands are overwritten. Band loop: the lowest band up to the current one that is outside +-0.9 dB of the target is corrected (gain -= 0.85 x deviation, limited to +-12 dB); when all bands up to the current one are green, the next band starts, so the lower bands are checked again after every step. A band that stays out of range after 5 attempts is marked and skipped.
+4. **Dynamics**: Multiband on (ratio 2:1, auto release); the target gain reduction of a band is the crest factor above the reference in the matching tonal bands (0.5 to 4 dB), the threshold starts at the measured band level minus twice that and is refined twice from the measured gain reduction. Bus Comp on (VCA, 2:1, soft knee, auto release) refined to about 1.5 dB of gain reduction. Saturation on with gentle density (Low Tape 2 dB, Mid Tube 1 dB at 50 %, High clean). Clipper on (Soft, low protect) 1.5 dB below the measured input peak, at most 6 dB below 0 dBFS. Then one more pass over the tonal bands.
+5. **Width**: Stereo on, Correlation guard at 0.00, split 4.5 kHz; Mid and High width move towards the reference width (analysis bands 150 Hz-4 kHz and above 4 kHz), 50-150 %, up to 3 steps. Mono material is left alone.
+6. **Loudness**: Limiter on, ceiling at most -1 dBTP, Output 0 dB; Drive moves by 0.9 x (reference integrated - measured) until the difference is within 0.5 LU (6 attempts).
+7. **Checks**: Low-End mono maker (120 Hz) when mono loss or low-band correlation is not green, the resonance suppressor (2-8 kHz, 4 dB) when harshness is not green; then one more pass over the bands if needed (at most two extra passes in total).
+8. The strip reports what stays out of range. PLR usually cannot be green together with a much louder level; the report says so.
 
 Stop keeps the current knobs; Undo restores the snapshot. The order logic is checked by the layout harness (`AutoMatchStrip::nextBand`).
+
+## D-032 Saturation band solo and mute (mockup v12)
+
+New parameters `sat_b1_solo`, `sat_b1_mute` ... `sat_b3_mute` (Off by default). They are appended at the end of the parameter list so that the order and the IDs of all older parameters stay the same; older projects load unchanged. Solo keeps only the soloed bands, Mute removes a band; both change the saved sound (they are processing parameters, not monitoring) and fade in 1 block to avoid clicks. A silent band is hatched on the graph and its card is dimmed.
+
+## D-033 Stereo editor scales and Multiband steps (mockup v12)
+
+The stereo graph shows two different quantities on one plot, each with its own scale: the module's width setting (0-200 %, 100 % = no change) and the measured stereo width of your mix and of the reference from the analysis (0-100 %, side energy share). The labels give the numbers. Mid uses the mean of the analysis bands 150-500 Hz and 0.5-4 kHz, High the band above 4 kHz. Double-click on a band resets its width to 100 %.
+
+Multiband knobs move in whole steps (dB, ms, %) and show whole numbers; Ratio moves in steps of 0.5 so that the default 1.5:1 stays reachable. The parameters keep their ranges and saved values; only the knob steps and the display change. Each Multiband knob tooltip has a section with advice for its band (45 approved texts, generated by `tools/gen_tooltips.py`).
+
+All file and folder dialogs are owned by the plugin window (a folder dialog could disappear behind the plugin window in REAPER).
 

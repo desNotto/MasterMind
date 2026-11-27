@@ -16,6 +16,7 @@ public:
         float driveDb = 0.0f;
         int type = 0; // Tube, Tape, Transformer, Diode
         float bias = 0.0f, mix = 1.0f, outDb = 0.0f;
+        bool solo = false, mute = false; // D-032: listen to one band, remove a band
     };
     struct Settings
     {
@@ -51,7 +52,7 @@ private:
     std::array<Channel, 2> ch;
     struct BandRamp
     {
-        Ramp drive, mix, out, bias;
+        Ramp drive, mix, out, bias, level; // level: solo/mute gain, ramped (no clicks)
     };
     std::array<BandRamp, 3> ramps;
     std::array<Meter, 3> peakMeters;

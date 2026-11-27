@@ -203,6 +203,15 @@ std::vector<Spec> build()
     v.push_back (c ("out_dither", "Dither", choice::dither, 0));
     v.push_back (c ("out_bits", "Dither Bits", choice::ditherBits, 1));
 
+    // ---- added in 0.7 (mockup v12, D-032): appended so that older projects keep their order --
+    for (int band = 1; band <= satBands; ++band)
+    {
+        static const char* names[] = { "Low", "Mid", "High" };
+        const auto n = juce::String ("Saturation ") + names[band - 1] + " ";
+        v.push_back (b (sat (band, "solo"), n + "Solo", false));
+        v.push_back (b (sat (band, "mute"), n + "Mute", false));
+    }
+
     return v;
 }
 } // namespace

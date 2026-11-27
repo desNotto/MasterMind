@@ -2,6 +2,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include <array>
 #include <vector>
 
 /** Approved Russian tooltip texts (mockup v4, D-011). Plain UTF-8 literals. */
@@ -48,6 +49,15 @@ const std::vector<ModuleText>& modules();
 const std::vector<KnobText>& knobs();
 const std::vector<ControlText>& controls();
 const std::vector<TonalAdvice>& tonalAdvice();
+
+/** Multiband advice per band (mockup v12): knob tooltip id ("mb.thresh") and one text per band
+    (Low, Lo-mid, Mid, Hi-mid, High). */
+struct BandAdvice
+{
+    const char* id;
+    std::array<const char*, 5> perBand;
+};
+const std::vector<BandAdvice>& multibandAdvice();
 
 inline juce::String u (const char* s) { return juce::String (juce::CharPointer_UTF8 (s)); }
 } // namespace mm::ui::tips

@@ -53,6 +53,10 @@ void Saturation::reset()
         ramps[(size_t) b].mix.reset (s.mix);
         ramps[(size_t) b].out.reset (dbToGain (s.outDb));
         ramps[(size_t) b].bias.reset (s.bias);
+        bool anySolo = false;
+        for (const auto& o : settings.bands)
+            anySolo = anySolo || o.solo;
+        ramps[(size_t) b].level.reset ((s.mute || (anySolo && ! s.solo)) ? 0.0 : 1.0);
     }
 }
 
@@ -90,16 +94,25 @@ void Saturation::process (float* left, float* right, int numSamples) noexcept
         ramps[(size_t) b].out.setTarget (dbToGain (s.outDb), n);
         ramps[(size_t) b].bias.setTarget (s.bias * 0.5, n);
     }
+    bool anySolo = false;
+    for (const auto& s : settings.bands)
+        anySolo = anySolo || s.solo;
+    for (int b = 0; b < 3; ++b)
+    {
+        const auto& s = settings.bands[(size_t) b];
+        ramps[(size_t) b].level.setTarget ((s.mute || (anySolo && ! s.solo)) ? 0.0 : 1.0, n);
+    }
 
     for (int i = 0; i < n; ++i)
     {
-        double drive[3], mixv[3], out[3], bias[3];
+        double drive[3], mixv[3], out[3], bias[3], level[3];
         for (int b = 0; b < 3; ++b)
         {
             drive[b] = ramps[(size_t) b].drive.next();
             mixv[b] = ramps[(size_t) b].mix.next();
             out[b] = ramps[(size_t) b].out.next();
             bias[b] = ramps[(size_t) b].bias.next();
+            level[b] = ramps[(size_t) b].level.next();
         }
         for (int c = 0; c < 2; ++c)
         {
@@ -118,7 +131,7 @@ void Saturation::process (float* left, float* right, int numSamples) noexcept
                 peaks[b] = std::max (peaks[b], std::abs (x));
                 // drive into the shaper, then divide by the drive so the level stays comparable
                 const double wet = shape (type, x * drive[b], bias[b]) / drive[b];
-                sum += (x + mixv[b] * (wet - x)) * out[b];
+                sum += (x + mixv[b] * (wet - x)) * out[b] * level[b];
             }
             d[i] = (float) st.dc.process (sum);
         }

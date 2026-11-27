@@ -283,3 +283,9 @@ Generated from `Source/state/Parameters.cpp`. The IDs are frozen since M1 (spec 
 | `out_gain` | Output Gain | −12.0 dB to 12.0 dB | 0.0 dB | yes |
 | `out_dither` | Dither | Off, TPDF, Noise-shaped | Off | yes |
 | `out_bits` | Dither Bits | 16 bit, 24 bit | 24 bit | yes |
+| `sat_b1_solo` | Saturation Low Solo | Off / On | Off | yes |
+| `sat_b1_mute` | Saturation Low Mute | Off / On | Off | yes |
+| `sat_b2_solo` | Saturation Mid Solo | Off / On | Off | yes |
+| `sat_b2_mute` | Saturation Mid Mute | Off / On | Off | yes |
+| `sat_b3_solo` | Saturation High Solo | Off / On | Off | yes |
+| `sat_b3_mute` | Saturation High Mute | Off / On | Off | yes |

@@ -314,7 +314,7 @@ ReferencesView::ReferencesView (Context& c) : ctx (c)
     };
     change.onClick = [this]
     {
-        chooser = std::make_unique<juce::FileChooser> ("Reference library folder", folder(), {}, true, false, getTopLevelComponent());
+        chooser = std::make_unique<juce::FileChooser> ("Reference library folder", folder(), juce::String(), true, false, getTopLevelComponent());
         chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories, [this] (const juce::FileChooser& fc)
         {
             if (fc.getResult().isDirectory())

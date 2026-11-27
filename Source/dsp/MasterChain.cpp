@@ -35,7 +35,7 @@ struct ParamPtrsImpl
     A monoOn, monoFreq, monoSlope, monoAmount, rotOn, rotFreq, rotAngle, trOn, trAmount, trMix;
     A busModel, busThr, busRatio, busAtt, busRel, busRelAuto, busKnee, busSc, busMix, busDetect, busLink, busMakeup;
     A satXo1, satXo2;
-    struct SatBand { A drive, type, bias, mix, out; };
+    struct SatBand { A drive, type, bias, mix, out, solo, mute; };
     std::array<SatBand, 3> satb {};
     A stSplit, stMid, stHigh, stBal, stGuard, stGuardThr;
     A clipType, clipThr, clipShape, clipMix, clipLow;
@@ -132,6 +132,8 @@ ParamPtrsImpl resolve (const params::Raw& r)
         s.bias = r.get (sat (b, "bias"));
         s.mix = r.get (sat (b, "mix"));
         s.out = r.get (sat (b, "out"));
+        s.solo = r.get (sat (b, "solo"));
+        s.mute = r.get (sat (b, "mute"));
     }
     p.stSplit = r.get ("st_split_freq");
     p.stMid = r.get ("st_mid_width");
@@ -323,6 +325,8 @@ void MasterChain::readSettings() noexcept
         d.bias = v (s.bias) * 0.01f;
         d.mix = v (s.mix) * 0.01f;
         d.outDb = v (s.out);
+        d.solo = v (s.solo) >= 0.5f;
+        d.mute = v (s.mute) >= 0.5f;
     }
 
     auto& st = stereoModule.settings;
