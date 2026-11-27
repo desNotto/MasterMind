@@ -32,7 +32,8 @@ enum class Unit
     ratio,
     degrees,
     dBTP,
-    dBFS
+    dBFS,
+    lufs
 };
 
 struct Spec

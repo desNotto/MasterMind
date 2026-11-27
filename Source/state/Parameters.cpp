@@ -211,6 +211,13 @@ std::vector<Spec> build()
         v.push_back (b (sat (band, "solo"), n + "Solo", false));
         v.push_back (b (sat (band, "mute"), n + "Mute", false));
     }
+    // mockup v15 (D-035)
+    v.push_back (f ("clip_drive", "Clipper Drive", 0.0f, 24.0f, 0.0f, Unit::dB));
+    {
+        auto target = f ("out_target", "Output Target Loudness", -30.0f, -3.0f, -9.0f, Unit::lufs, 0.0f, 0.1f);
+        target.automatable = false; // a setting for Reach target, not a sound parameter
+        v.push_back (target);
+    }
 
     return v;
 }
@@ -255,6 +262,7 @@ juce::String formatValue (const Spec& spec, float value)
         case Unit::dB: return signedDb (value, 1) + " dB";
         case Unit::dBTP: return signedDb (value, 1) + " dBTP";
         case Unit::dBFS: return signedDb (value, 1) + " dBFS";
+        case Unit::lufs: return signedDb (value, 1) + " LUFS";
         case Unit::hz:
             if (value >= 1000.0f)
                 return juce::String (value / 1000.0f, value >= 10000.0f ? 1 : 2) + " kHz";

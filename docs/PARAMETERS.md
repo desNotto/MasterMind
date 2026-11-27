@@ -289,3 +289,5 @@ Generated from `Source/state/Parameters.cpp`. The IDs are frozen since M1 (spec 
 | `sat_b2_mute` | Saturation Mid Mute | Off / On | Off | yes |
 | `sat_b3_solo` | Saturation High Solo | Off / On | Off | yes |
 | `sat_b3_mute` | Saturation High Mute | Off / On | Off | yes |
+| `clip_drive` | Clipper Drive | 0.0 dB to 24.0 dB | 0.0 dB | yes |
+| `out_target` | Output Target Loudness | −30.0 LUFS to −3.0 LUFS | −9.0 LUFS | no |

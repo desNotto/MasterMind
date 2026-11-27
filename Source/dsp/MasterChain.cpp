@@ -38,7 +38,7 @@ struct ParamPtrsImpl
     struct SatBand { A drive, type, bias, mix, out, solo, mute; };
     std::array<SatBand, 3> satb {};
     A stSplit, stMid, stHigh, stBal, stGuard, stGuardThr;
-    A clipType, clipThr, clipShape, clipMix, clipLow;
+    A clipType, clipThr, clipShape, clipMix, clipLow, clipDrive;
     A limLook, limRel, limRelAuto, limMode, limDrive, limCeil, limLink, limTrans;
     A outGain, outDither, outBits;
 };
@@ -146,6 +146,7 @@ ParamPtrsImpl resolve (const params::Raw& r)
     p.clipShape = r.get ("clip_shape");
     p.clipMix = r.get ("clip_mix");
     p.clipLow = r.get ("clip_lowprot");
+    p.clipDrive = r.get ("clip_drive");
     p.limLook = r.get ("lim_lookahead");
     p.limRel = r.get ("lim_rel");
     p.limRelAuto = r.get ("lim_rel_auto");
@@ -344,6 +345,7 @@ void MasterChain::readSettings() noexcept
     cl.shape = v (q.clipShape) * 0.01f;
     cl.mix = v (q.clipMix) * 0.01f;
     cl.lowProtect = bv (q.clipLow);
+    cl.driveDb = v (q.clipDrive);
 
     auto& li = limModule.settings;
     li.lookaheadMs = v (q.limLook);

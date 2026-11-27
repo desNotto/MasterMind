@@ -40,6 +40,9 @@ void Clipper::prepare (const Context& ctx)
 {
     fs = ctx.sampleRate;
     os.prepare (2, 3, ctx.maxBlock); // 4x normal, 8x high
+    capIn.assign ((size_t) captureSize, 0.0f);
+    capOut.assign ((size_t) captureSize, 0.0f);
+    scratchIn.assign ((size_t) std::max (1, ctx.maxBlock), 0.0f);
     reset();
 }
 
@@ -51,11 +54,40 @@ void Clipper::reset()
         c.reset();
     thr.reset (dbToGain (settings.thresholdDb));
     mix.reset (settings.mix);
+    drive.reset (dbToGain (settings.driveDb));
     prMeter.set (0.0f);
+}
+
+int Clipper::readCapture (float* in, float* out, int maxSamples) noexcept
+{
+    const auto scope = capture.read (std::min (maxSamples, capture.getNumReady()));
+    int n = 0;
+    for (int k = 0; k < scope.blockSize1; ++k, ++n)
+    {
+        in[n] = capIn[(size_t) (scope.startIndex1 + k)];
+        out[n] = capOut[(size_t) (scope.startIndex1 + k)];
+    }
+    for (int k = 0; k < scope.blockSize2; ++k, ++n)
+    {
+        in[n] = capIn[(size_t) (scope.startIndex2 + k)];
+        out[n] = capOut[(size_t) (scope.startIndex2 + k)];
+    }
+    return n;
 }
 
 void Clipper::process (float* left, float* right, int numSamples) noexcept
 {
+    // Drive (gain before clipping), ramped; the mono input is kept for the waveform view
+    drive.setTarget (dbToGain (settings.driveDb), numSamples);
+    const int cap = std::min (numSamples, (int) scratchIn.size());
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float g = (float) drive.next();
+        left[i] *= g;
+        right[i] *= g;
+        if (i < cap)
+            scratchIn[(size_t) i] = 0.5f * (left[i] + right[i]);
+    }
     float* chans[2] = { left, right };
     juce::dsp::AudioBlock<float> block (chans, 2, (size_t) numSamples);
     auto up = os.up (block);
@@ -91,6 +123,20 @@ void Clipper::process (float* left, float* right, int numSamples) noexcept
     os.down (block);
     prMeter.set (inPeak > 1.0e-9 ? (float) std::min (0.0, gainToDb (outPeak / inPeak)) : 0.0f);
     inMeter.set ((float) gainToDb (inPeak + 1.0e-9));
+    {
+        const auto scope = capture.write (std::min (cap, capture.getFreeSpace()));
+        int k = 0;
+        for (int j = 0; j < scope.blockSize1; ++j, ++k)
+        {
+            capIn[(size_t) (scope.startIndex1 + j)] = scratchIn[(size_t) k];
+            capOut[(size_t) (scope.startIndex1 + j)] = 0.5f * (left[k] + right[k]);
+        }
+        for (int j = 0; j < scope.blockSize2; ++j, ++k)
+        {
+            capIn[(size_t) (scope.startIndex2 + j)] = scratchIn[(size_t) k];
+            capOut[(size_t) (scope.startIndex2 + j)] = 0.5f * (left[k] + right[k]);
+        }
+    }
 }
 
 // ---- Limiter -----------------------------------------------------------------------------------------
@@ -188,7 +234,7 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
     const int delay = lookahead + TruePeakDetector8::latency();
     const int cap = (int) delayBuf[0].size();
     float* io[2] = { left, right };
-    float maxGr = 0.0f;
+    float maxGr = 0.0f, inPk = 0.0f, outPk = 0.0f;
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -197,6 +243,7 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
         for (int c = 0; c < 2; ++c)
         {
             const float x = (float) (io[c][i] * g);
+            inPk = std::max (inPk, std::abs (x));
             peak[c] = detector[(size_t) c].process (x);
             delayBuf[(size_t) c][(size_t) delayPos] = x;
         }
@@ -227,6 +274,7 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
         {
             const double y = delayBuf[(size_t) c][(size_t) r] * gains[c];
             io[c][i] = (float) std::clamp (y, -hardCeiling, hardCeiling); // final safety stage
+            outPk = std::max (outPk, std::abs (io[c][i]));
             minGain = std::min (minGain, gains[c]);
         }
         const float gr = (float) gainToDb (minGain);
@@ -247,5 +295,7 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
         }
     }
     grMeter.set (maxGr);
+    inMeter.set ((float) gainToDb (inPk + 1.0e-9));
+    outMeter.set ((float) gainToDb (outPk + 1.0e-9));
 }
 } // namespace mm::dsp

@@ -18,6 +18,7 @@ public:
         int type = 1; // Hard, Soft (tanh), Soft knee, Diode
         float thresholdDb = -1.0f, shape = 0.5f, mix = 1.0f;
         bool lowProtect = true;
+        float driveDb = 0.0f; // gain before clipping (mockup v15)
     } settings;
 
     void prepare (const Context& ctx) override;
@@ -33,13 +34,21 @@ public:
 
     static double clip (int type, double x, double t, double shape) noexcept;
 
+    /** Waveform for the UI (single producer: audio thread, single consumer: message thread):
+        mono input after Drive and mono output at the base rate. The output lags the input by
+        latency() samples. Returns the number of samples read. */
+    int readCapture (float* in, float* out, int maxSamples) noexcept;
+
 private:
     double fs = 48000.0;
     DualOversampler os;
     double lastRate = 0.0;
     std::array<Cascade, 2> lowProt;
-    Ramp thr, mix;
+    Ramp thr, mix, drive;
     Meter prMeter, inMeter;
+    static constexpr int captureSize = 16384;
+    juce::AbstractFifo capture { captureSize };
+    std::vector<float> capIn, capOut, scratchIn;
 };
 
 /** 4.9 True-peak-safe look-ahead limiter with a fast transient stage and a slower program stage. */
@@ -60,6 +69,9 @@ public:
     int latency() const noexcept override { return lookahead + detector[0].latency(); }
 
     float gainReductionDb() const noexcept { return grMeter.get(); }
+    /** Peak of the last block in dBFS after Drive (before limiting) and at the output. */
+    float inputPeakDb() const noexcept { return inMeter.get(); }
+    float outputPeakDb() const noexcept { return outMeter.get(); }
 
     /** Fills the per-sample gain reduction (dB) of the last block for the histogram. */
     const float* lastGainReduction() const noexcept { return grTrace.data(); }
@@ -86,7 +98,7 @@ private:
     std::array<Pipe, 2> pipes;
     double sustainedCoeff = 0.0;
     Ramp drive;
-    Meter grMeter;
+    Meter grMeter, inMeter, outMeter;
     std::vector<float> grTrace;
 };
 } // namespace mm::dsp

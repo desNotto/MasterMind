@@ -1,6 +1,7 @@
 #include "ui/ModuleEditors.h"
 #include "ui/Locale.h"
 
+#include "dsp/ClipLimit.h"
 #include "dsp/SatStereo.h"
 #include "ui/EyesView.h"
 #include "state/Parameters.h"
@@ -2013,6 +2014,820 @@ public:
     std::vector<Knob*> monoKnobs, rotKnobs, trKnobs;
 };
 
+// ---- Clipper (mockup v15) --------------------------------------------------------------------------------
+const juce::Colour clMag { 0xffe35bd8 }, clRed { 0xffff5468 };
+
+void drawBox (juce::Graphics& g, juce::Rectangle<float> r)
+{
+    g.setColour (col::sunk);
+    g.fillRoundedRectangle (r, 6.0f);
+    g.setColour (col::line);
+    g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+}
+
+/** The waveform around the loudest hit of the last 0.3 s: input after Drive and output, threshold
+    lines and the cut parts in red. Refreshed 5 times per second so that it can be read. */
+class ClWave final : public juce::Component
+{
+public:
+    explicit ClWave (Context& c) : ctx (c)
+    {
+        setTip (*this, "c:cl.wave");
+        ringIn.assign ((size_t) ringSize, 0.0f);
+        ringOut.assign ((size_t) ringSize, 0.0f);
+        tmpIn.assign (16384, 0.0f);
+        tmpOut.assign (16384, 0.0f);
+    }
+    void pull()
+    {
+        auto& clip = const_cast<dsp::Clipper&> (ctx.proc.getChain().getClipper());
+        const int n = clip.readCapture (tmpIn.data(), tmpOut.data(), (int) tmpIn.size());
+        for (int i = 0; i < n; ++i)
+        {
+            ringIn[(size_t) pos] = tmpIn[(size_t) i];
+            ringOut[(size_t) pos] = tmpOut[(size_t) i];
+            pos = (pos + 1) % ringSize;
+        }
+        if (++frames % 6 == 0)
+            freeze();
+    }
+    /** Copies a 40 ms window around the loudest input sample of the last 0.3 s (output aligned by the clipper latency). */
+    void freeze()
+    {
+        const double fs = ctx.proc.getSampleRate() > 0 ? ctx.proc.getSampleRate() : 48000.0;
+        const int lat = ctx.proc.getChain().getClipper().latency();
+        const int look = std::min (ringSize - 4096, (int) (0.3 * fs)), win = std::min (2048, (int) (0.04 * fs));
+        int best = -1;
+        float bestV = 0.0f;
+        for (int k = lat + win; k < look; ++k)
+        {
+            const int idx = ((pos - k) % ringSize + ringSize) % ringSize;
+            if (std::abs (ringIn[(size_t) idx]) > bestV)
+            {
+                bestV = std::abs (ringIn[(size_t) idx]);
+                best = k;
+            }
+        }
+        viewIn.assign ((size_t) win, 0.0f);
+        viewOut.assign ((size_t) win, 0.0f);
+        if (best < 0)
+            return;
+        for (int i = 0; i < win; ++i)
+        {
+            const int k = best + win / 3 - i; // the peak sits at one third of the window
+            const int iIn = ((pos - k) % ringSize + ringSize) % ringSize;
+            const int iOut = ((pos - (k - lat)) % ringSize + ringSize) % ringSize;
+            viewIn[(size_t) (win - 1 - i)] = ringIn[(size_t) iIn];
+            viewOut[(size_t) (win - 1 - i)] = ringOut[(size_t) iOut];
+        }
+        repaint();
+    }
+    void paint (juce::Graphics& g) override
+    {
+        const auto r = getLocalBounds().toFloat();
+        drawBox (g, r);
+        const float mid = r.getCentreY() - 6.0f;
+        const float t = std::pow (10.0f, ctx.param ("clip_thr") / 20.0f);
+        float peak = t * 1.15f;
+        for (auto v : viewIn)
+            peak = std::max (peak, std::abs (v));
+        const float amp = (r.getHeight() / 2.0f - 20.0f) / peak;
+        const auto X = [&] (size_t i) { return 8.0f + (float) i / (float) std::max<size_t> (1, viewIn.size() - 1) * (r.getWidth() - 16.0f); };
+        const auto Y = [&] (float v) { return mid - v * amp; };
+        g.setColour (juce::Colour (0xff232831));
+        g.drawHorizontalLine ((int) mid, 0.0f, r.getWidth());
+        const float dash[] = { 5.0f, 4.0f };
+        g.setColour (clRed);
+        g.drawDashedLine (juce::Line<float> (0.0f, Y (t), r.getWidth(), Y (t)), dash, 2, 1.0f);
+        g.drawDashedLine (juce::Line<float> (0.0f, Y (-t), r.getWidth(), Y (-t)), dash, 2, 1.0f);
+        g.setFont (font (10.5f));
+        g.setColour (juce::Colour (0xffff8a95));
+        g.drawText ("Thresh " + fmtMinus (ctx.param ("clip_thr")) + " dB", juce::Rectangle<float> (r.getWidth() - 130.0f, Y (t) - 15.0f, 122.0f, 13.0f), juce::Justification::centredRight);
+        if (ctx.param ("clip_on") < 0.5f || viewIn.empty())
+        {
+            g.setColour (col::text3);
+            g.setFont (font (12.5f));
+            g.drawText (ctx.param ("clip_on") < 0.5f ? "Clipper is off" : "Play the song to see the waveform", r, juce::Justification::centred);
+            return;
+        }
+        for (size_t i = 0; i < viewIn.size(); ++i)
+            if (std::abs (viewIn[i]) > t)
+            {
+                g.setColour (clRed.withAlpha (0.55f));
+                g.drawLine (X (i), Y (viewIn[i]), X (i), Y (viewOut[i]), 1.4f);
+            }
+        juce::Path pi, po;
+        for (size_t i = 0; i < viewIn.size(); ++i)
+        {
+            i == 0 ? pi.startNewSubPath (X (i), Y (viewIn[i])) : pi.lineTo (X (i), Y (viewIn[i]));
+            i == 0 ? po.startNewSubPath (X (i), Y (viewOut[i])) : po.lineTo (X (i), Y (viewOut[i]));
+        }
+        g.setColour (juce::Colour (0xff8b93a1).withAlpha (0.85f));
+        g.strokePath (pi, juce::PathStrokeType (1.2f));
+        g.setColour (clMag);
+        g.strokePath (po, juce::PathStrokeType (1.8f));
+        // legend and readouts
+        auto lg = juce::Rectangle<float> (8.0f, 6.0f, 238.0f, 20.0f);
+        g.setColour (col::sunk);
+        g.fillRoundedRectangle (lg, 4.0f);
+        g.setColour (col::line);
+        g.drawRoundedRectangle (lg, 4.0f, 1.0f);
+        g.setFont (font (10.5f));
+        g.setColour (juce::Colour (0xff8b93a1));
+        g.fillRect (lg.getX() + 8.0f, lg.getCentreY() - 1.5f, 14.0f, 3.0f);
+        g.setColour (col::text2);
+        g.drawText ("in (after Drive)", lg.withTrimmedLeft (26.0f), juce::Justification::centredLeft);
+        g.setColour (clMag);
+        g.fillRect (lg.getX() + 110.0f, lg.getCentreY() - 1.5f, 14.0f, 3.0f);
+        g.setColour (col::text2);
+        g.drawText ("out", lg.withTrimmedLeft (128.0f), juce::Justification::centredLeft);
+        g.setColour (clRed.withAlpha (0.7f));
+        g.fillRect (lg.getX() + 160.0f, lg.getCentreY() - 4.5f, 3.0f, 9.0f);
+        g.setColour (col::text2);
+        g.drawText ("cut off", lg.withTrimmedLeft (168.0f), juce::Justification::centredLeft);
+        g.setColour (col::text3);
+        g.drawText ("40 ms around the loudest hit", juce::Rectangle<float> (8.0f, r.getBottom() - 16.0f, 220.0f, 14.0f), juce::Justification::centredLeft);
+        g.setColour (juce::Colour (0xffff8a95));
+        g.drawText ("peaks cut by " + fmtMinus (-ctx.proc.getChain().getClipper().peakReductionDb()) + " dB", juce::Rectangle<float> (r.getWidth() - 168.0f, r.getBottom() - 16.0f, 160.0f, 14.0f), juce::Justification::centredRight);
+    }
+    Context& ctx;
+    static constexpr int ringSize = 32768;
+    std::vector<float> ringIn, ringOut, tmpIn, tmpOut, viewIn, viewOut;
+    int pos = 0, frames = 0;
+};
+
+/** Transfer curve of a clipper type; `full` adds the threshold, the axes and the Drive. */
+void drawClipCurve (juce::Graphics& g, juce::Rectangle<float> r, int type, float thrLin, float shape, float mix, juce::Colour c, bool full)
+{
+    const float pad = full ? 8.0f : 3.0f, h = r.getWidth() / 2.0f - pad;
+    const auto P = [&] (double x, double y) { return juce::Point<float> (r.getCentreX() + (float) (x / 1.6) * h, r.getCentreY() - (float) (y / 1.6) * h); };
+    const float dash[] = { 3.0f, 3.0f };
+    g.setColour (juce::Colour (0xff3a414d));
+    g.drawDashedLine (juce::Line<float> (P (-1.6, -1.6), P (1.6, 1.6)), dash, 2, 1.0f);
+    if (full)
+    {
+        g.setColour (clRed);
+        g.drawDashedLine (juce::Line<float> (r.getX() + pad, P (0.0, thrLin).y, r.getRight() - pad, P (0.0, thrLin).y), dash, 2, 1.0f);
+        g.setColour (col::text3);
+        g.setFont (font (10.5f));
+        g.drawText ("out", juce::Rectangle<float> (r.getX() + pad + 2, r.getY() + pad, 30, 12), juce::Justification::centredLeft);
+        g.drawText (juce::String ("in ") + juce::String (juce::CharPointer_UTF8 ("\xe2\x86\x92")), juce::Rectangle<float> (r.getX() + pad + 2, r.getBottom() - 16, 40, 12), juce::Justification::centredLeft);
+    }
+    juce::Path p;
+    for (int k = 0; k <= 80; ++k)
+    {
+        const double x = -1.6 + 3.2 * k / 80.0;
+        const double y = mix * dsp::Clipper::clip (type, x, thrLin, shape) + (1.0 - mix) * x;
+        const auto pt = P (x, juce::jlimit (-1.6, 1.6, y));
+        k == 0 ? p.startNewSubPath (pt) : p.lineTo (pt);
+    }
+    g.setColour (c);
+    g.strokePath (p, juce::PathStrokeType (full ? 2.4f : 1.6f));
+}
+
+class ClCurve final : public juce::Component
+{
+public:
+    explicit ClCurve (Context& c) : ctx (c) { setTip (*this, "c:cl.curve"); }
+    void paint (juce::Graphics& g) override
+    {
+        const auto r = getLocalBounds().toFloat();
+        drawBox (g, r);
+        const float t = std::pow (10.0f, ctx.param ("clip_thr") / 20.0f);
+        drawClipCurve (g, r.withSizeKeepingCentre (std::min (r.getWidth(), r.getHeight()), std::min (r.getWidth(), r.getHeight())), juce::roundToInt (ctx.param ("clip_type")), t,
+                       ctx.param ("clip_shape") / 100.0f, ctx.param ("clip_mix") / 100.0f, clMag, true);
+    }
+    Context& ctx;
+};
+
+/** Modes with pictures (clip_type or lim_mode): click selects. */
+class ModeList final : public juce::Component
+{
+public:
+    ModeList (Context& c, juce::String paramId, juce::StringArray n, juce::StringArray d, juce::String tip, std::function<void (juce::Graphics&, juce::Rectangle<float>, int)> thumb)
+        : ctx (c), id (std::move (paramId)), names (std::move (n)), descs (std::move (d)), drawThumb (std::move (thumb))
+    {
+        setTip (*this, tip);
+        setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    }
+    void paint (juce::Graphics& g) override
+    {
+        const auto r = getLocalBounds().toFloat();
+        drawBox (g, r);
+        const int sel = juce::roundToInt (ctx.param (id));
+        const float rowH = (r.getHeight() - 12.0f - (footer.isNotEmpty() ? 16.0f : 0.0f)) / names.size();
+        for (int i = 0; i < names.size(); ++i)
+        {
+            auto row = juce::Rectangle<float> (6.0f, 6.0f + i * rowH, r.getWidth() - 12.0f, rowH - 2.0f);
+            if (i == sel)
+            {
+                g.setColour (clMag.withAlpha (0.10f));
+                g.fillRoundedRectangle (row, 5.0f);
+                g.setColour (juce::Colour (0xff7a3374));
+                g.drawRoundedRectangle (row, 5.0f, 1.0f);
+            }
+            auto thumb = row.removeFromLeft (row.getHeight()).reduced (3.0f);
+            g.setColour (col::sunk);
+            g.fillRoundedRectangle (thumb, 3.0f);
+            g.setColour (col::line);
+            g.drawRoundedRectangle (thumb, 3.0f, 1.0f);
+            drawThumb (g, thumb, i);
+            row.removeFromLeft (8.0f);
+            g.setColour (i == sel ? juce::Colours::white : col::text2);
+            g.setFont (semibold (12.5f));
+            g.drawText (names[i], row.removeFromTop (row.getHeight() / 2.0f), juce::Justification::bottomLeft, true);
+            g.setColour (col::text3);
+            g.setFont (font (11.0f));
+            g.drawText (descs[i], row, juce::Justification::topLeft, true);
+        }
+        if (footer.isNotEmpty())
+        {
+            g.setColour (col::text3);
+            g.setFont (font (11.0f));
+            g.drawText (footer, r.withTop (r.getBottom() - 18.0f).reduced (8.0f, 0.0f), juce::Justification::centredLeft, true);
+        }
+    }
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        const float rowH = (getHeight() - 12.0f - (footer.isNotEmpty() ? 16.0f : 0.0f)) / names.size();
+        const int i = (int) ((e.position.y - 6.0f) / rowH);
+        if (i >= 0 && i < names.size())
+            ctx.setParam (id, (float) i);
+        repaint();
+    }
+    Context& ctx;
+    juce::String id, footer;
+    juce::StringArray names, descs;
+    std::function<void (juce::Graphics&, juce::Rectangle<float>, int)> drawThumb;
+};
+
+class ClipperEditor final : public ModuleEditor
+{
+public:
+    explicit ClipperEditor (Context& c)
+        : ModuleEditor (c, 7, "shaves drum peaks before the limiter, Drive pushes the signal into the clipper"), wave (c), curve (c),
+          modes (c, "clip_type", { "Hard", "Soft", "Soft knee", "Diode" }, { "straight cut, loudest", "round, warm", "round only near the top", "asymmetric, gritty" }, "c:cl.mode",
+                 [this] (juce::Graphics& g, juce::Rectangle<float> r, int i) { drawClipCurve (g, r, i, 0.8f, ctx.param ("clip_shape") / 100.0f, 1.0f, clMag, false); })
+    {
+        auto& peak = own (std::make_unique<Painter>());
+        peak.setInterceptsMouseClicks (false, false);
+        peak.draw = [this] (juce::Graphics& g, juce::Rectangle<int> r)
+        {
+            const auto v = fmtMinus (ctx.proc.getChain().getClipper().peakReductionDb()) + " dB";
+            const int vw = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font (12.5f, true), v)) + 4;
+            g.setColour (col::orange);
+            g.setFont (font (12.5f, true));
+            g.drawText (v, r.removeFromRight (vw), juce::Justification::centredRight);
+            g.setColour (col::text3);
+            g.setFont (font (12.5f));
+            g.drawText ("Peak", r, juce::Justification::centredRight);
+        };
+        readout = &peak;
+        addRight (peak, 100);
+        lowProt.attach (ctx.apvts, "clip_lowprot");
+        setTip (lowProt, "c:cl.lowprot");
+        addRight (lowProt, 92);
+        for (auto* comp : { (juce::Component*) &wave, (juce::Component*) &curve, (juce::Component*) &modes })
+            addAndMakeVisible (*comp);
+        auto& drive = makeKnob (*this, "clip_drive", "Drive", "cl.drive", clMag);
+        auto& thr = makeKnob (*this, "clip_thr", "Thresh", "cl.thr", clMag);
+        thr.meterLevel = [this]
+        {
+            if (ctx.param ("clip_on") < 0.5f)
+                return noSignal();
+            const float v = ctx.proc.getChain().getClipper().inputPeakDb();
+            return v <= -99.0f ? noSignal() : v;
+        };
+        row = { &drive, &thr, &makeKnob (*this, "clip_shape", "Shape", "cl.shape", clMag), &makeKnob (*this, "clip_mix", "Mix", "cl.mix", clMag) };
+    }
+    int naturalHeight (int) const override { return compact ? headH + 8 + 120 + 8 + knobH + 8 : headH + 8 + 176 + 8 + knobH + 8; }
+    void update() override
+    {
+        ModuleEditor::update();
+        wave.pull();
+        curve.repaint();
+        modes.repaint();
+        readout->repaint();
+    }
+    void layoutBody (juce::Rectangle<int> r) override
+    {
+        auto top = r.removeFromTop (compact ? 120 : 176);
+        curve.setVisible (! compact);
+        modes.setVisible (! compact);
+        if (! compact)
+        {
+            modes.setBounds (top.removeFromRight (206));
+            top.removeFromRight (10);
+            curve.setBounds (top.removeFromRight (176));
+            top.removeFromRight (10);
+        }
+        wave.setBounds (top);
+        r.removeFromTop (8);
+        auto kr = r.removeFromTop (knobH);
+        hint = kr.withTrimmedLeft (layoutKnobRow (kr, row) + 14).withWidth (320);
+    }
+    void paint (juce::Graphics& g) override
+    {
+        ModuleEditor::paint (g);
+        if (compact || hint.isEmpty())
+            return;
+        const float d = ctx.param ("clip_drive"), t = ctx.param ("clip_thr");
+        g.setColour (col::text3);
+        g.setFont (font (12.0f));
+        g.drawFittedText ("Drive raises the level before the clipper. With Thresh it sets how much is cut: Drive " + fmtSigned (d) + " dB at " + fmtMinus (t)
+                              + " dB cuts up to " + juce::String (d - t, 1) + " dB of the peaks.",
+                          hint, juce::Justification::centredLeft, 3);
+    }
+    ClWave wave;
+    ClCurve curve;
+    ModeList modes;
+    Btn lowProt { "Low protect", true };
+    Painter* readout = nullptr;
+    std::vector<Knob*> row;
+    juce::Rectangle<int> hint;
+};
+
+// ---- Limiter (mockup v15) --------------------------------------------------------------------------------
+/** Level over the last 6 s: input after Drive, output, the ceiling and the gain reduction strip on top. */
+class LiTime final : public juce::Component
+{
+public:
+    explicit LiTime (Context& c) : ctx (c)
+    {
+        setTip (*this, "c:li.time");
+        in.fill (-100.0f);
+        out.fill (-100.0f);
+        gr.fill (0.0f);
+    }
+    void push()
+    {
+        const auto& lim = ctx.proc.getChain().getLimiter();
+        const bool on = ctx.param ("lim_on") >= 0.5f;
+        in[(size_t) pos] = on ? lim.inputPeakDb() : -100.0f;
+        out[(size_t) pos] = on ? lim.outputPeakDb() : -100.0f;
+        gr[(size_t) pos] = on ? -lim.gainReductionDb() : 0.0f;
+        pos = (pos + 1) % n;
+        repaint();
+    }
+    float maxGr() const { return *std::max_element (gr.begin(), gr.end()); }
+    void paint (juce::Graphics& g) override
+    {
+        const auto r = getLocalBounds().toFloat();
+        drawBox (g, r);
+        const float x0 = 30.0f, x1 = r.getWidth() - 40.0f, grTop = 8.0f, grH = 40.0f, top = 56.0f, bottom = r.getHeight() - 16.0f;
+        const auto Y = [&] (float db) { return top + (1.0f - juce::jlimit (-15.0f, 1.0f, db)) / 16.0f * (bottom - top); };
+        const auto X = [&] (int i) { return x0 + (float) i / (n - 1) * (x1 - x0); };
+        g.setColour (juce::Colour (0xff11141a));
+        g.fillRect (juce::Rectangle<float> (x0, grTop, x1 - x0, grH));
+        g.setFont (font (10.0f));
+        for (int d : { 0, -3, -6, -9, -12, -15 })
+        {
+            g.setColour (juce::Colour (0xff1b1f26));
+            g.drawHorizontalLine ((int) Y ((float) d), x0, x1);
+            g.setColour (col::text3);
+            g.drawText (d == 0 ? juce::String ("0") : minusSign() + juce::String (-d), juce::Rectangle<float> (x1 + 4.0f, Y ((float) d) - 7.0f, 30.0f, 14.0f), juce::Justification::centredLeft);
+        }
+        g.drawText ("0", juce::Rectangle<float> (x1 + 4.0f, grTop - 2.0f, 30.0f, 12.0f), juce::Justification::centredLeft);
+        g.drawText (minusSign() + "9", juce::Rectangle<float> (x1 + 4.0f, grTop + grH - 10.0f, 30.0f, 12.0f), juce::Justification::centredLeft);
+        juce::Path grFill, grLine, pIn, pOut;
+        grFill.startNewSubPath (x0, grTop);
+        for (int i = 0; i < n; ++i)
+        {
+            const int k = (pos + i) % n;
+            const float yg = grTop + juce::jlimit (0.0f, 1.0f, gr[(size_t) k] / 9.0f) * grH;
+            grFill.lineTo (X (i), yg);
+            i == 0 ? grLine.startNewSubPath (X (i), yg) : grLine.lineTo (X (i), yg);
+            // no line where there is no signal yet (history not filled, limiter off)
+            if (in[(size_t) k] > -90.0f)
+            {
+                const bool fresh = i == 0 || in[(size_t) ((k + n - 1) % n)] <= -90.0f;
+                fresh ? pIn.startNewSubPath (X (i), Y (in[(size_t) k])) : pIn.lineTo (X (i), Y (in[(size_t) k]));
+                fresh ? pOut.startNewSubPath (X (i), Y (out[(size_t) k])) : pOut.lineTo (X (i), Y (out[(size_t) k]));
+            }
+        }
+        grFill.lineTo (x1, grTop);
+        grFill.closeSubPath();
+        g.setColour (col::orange.withAlpha (0.35f));
+        g.fillPath (grFill);
+        g.setColour (col::orange);
+        g.strokePath (grLine, juce::PathStrokeType (1.4f));
+        g.setColour (juce::Colour (0xffffb877));
+        g.drawText ("gain reduction, dB", juce::Rectangle<float> (x0 + 4.0f, grTop + grH - 14.0f, 140.0f, 12.0f), juce::Justification::centredLeft);
+        g.setColour (juce::Colour (0xff8b93a1).withAlpha (0.85f));
+        g.strokePath (pIn, juce::PathStrokeType (1.1f));
+        g.setColour (clMag);
+        g.strokePath (pOut, juce::PathStrokeType (1.8f));
+        const float ceil = ctx.param ("lim_ceiling");
+        const float dash[] = { 5.0f, 4.0f };
+        g.setColour (clRed);
+        g.drawDashedLine (juce::Line<float> (x0, Y (ceil), x1, Y (ceil)), dash, 2, 1.0f);
+        g.setColour (juce::Colour (0xffff8a95));
+        g.setFont (font (10.5f));
+        g.drawText ("Ceiling " + fmtMinus (ceil) + " dBTP", juce::Rectangle<float> (x1 - 140.0f, Y (ceil) - 15.0f, 136.0f, 13.0f), juce::Justification::centredRight);
+        g.setColour (col::text3);
+        g.drawText (minusSign() + "6 s", juce::Rectangle<float> (x0, r.getBottom() - 15.0f, 40.0f, 13.0f), juce::Justification::centredLeft);
+        g.drawText ("now", juce::Rectangle<float> (x1 - 40.0f, r.getBottom() - 15.0f, 40.0f, 13.0f), juce::Justification::centredRight);
+        if (ctx.param ("lim_on") < 0.5f)
+        {
+            g.setColour (col::text3);
+            g.setFont (font (12.5f));
+            g.drawText ("Limiter is off", r, juce::Justification::centred);
+        }
+    }
+    Context& ctx;
+    static constexpr int n = 180; // 6 s at 30 Hz
+    std::array<float, n> in {}, out {}, gr {};
+    int pos = 0;
+};
+
+class LiMeters final : public juce::Component
+{
+public:
+    LiMeters (Context& c, LiTime& t) : ctx (c), time (t) { setTip (*this, "c:li.meters"); }
+    void paint (juce::Graphics& g) override
+    {
+        const auto r = getLocalBounds().toFloat();
+        drawBox (g, r);
+        const float now = ctx.param ("lim_on") >= 0.5f ? -ctx.proc.getChain().getLimiter().gainReductionDb() : 0.0f, mx = time.maxGr();
+        const auto bar = [&] (float x, float v, juce::Colour c, const juce::String& label)
+        {
+            const juce::Rectangle<float> b (x - 9.0f, 10.0f, 18.0f, 84.0f);
+            g.setColour (col::sunk);
+            g.fillRoundedRectangle (b, 4.0f);
+            g.setColour (col::line);
+            g.drawRoundedRectangle (b, 4.0f, 1.0f);
+            g.setColour (c);
+            g.fillRoundedRectangle (b.withHeight (b.getHeight() * juce::jlimit (0.0f, 1.0f, v / 12.0f)), 4.0f);
+            g.setFont (font (12.5f, true));
+            g.drawText ((v > 0.05f ? minusSign() : juce::String()) + juce::String (v, 1), juce::Rectangle<float> (x - 30.0f, 98.0f, 60.0f, 15.0f), juce::Justification::centred);
+            g.setColour (col::text3);
+            g.setFont (font (11.0f));
+            g.drawText (label, juce::Rectangle<float> (x - 34.0f, 113.0f, 68.0f, 13.0f), juce::Justification::centred);
+        };
+        bar (r.getWidth() * 0.3f, now, col::orange, "GR now");
+        bar (r.getWidth() * 0.7f, mx, juce::Colour (0xffffb877), "GR max");
+        const auto& o = ctx.out();
+        const double ceiling = ctx.param ("lim_ceiling");
+        g.setFont (font (11.5f));
+        g.setColour (col::text3);
+        g.drawText ("True peak out", juce::Rectangle<float> (8.0f, 132.0f, 90.0f, 14.0f), juce::Justification::centredLeft);
+        g.drawText ("Overs", juce::Rectangle<float> (8.0f, 150.0f, 90.0f, 14.0f), juce::Justification::centredLeft);
+        g.setFont (font (11.5f, true));
+        g.setColour (o.truePeak <= ceiling ? col::ok : col::bad);
+        g.drawText (fmtLufs (o.truePeak), juce::Rectangle<float> (r.getWidth() - 58.0f, 132.0f, 50.0f, 14.0f), juce::Justification::centredRight);
+        g.setColour (o.truePeakOvers > 0 ? col::warn : col::ok);
+        g.drawText (juce::String ((juce::int64) o.truePeakOvers), juce::Rectangle<float> (r.getWidth() - 58.0f, 150.0f, 50.0f, 14.0f), juce::Justification::centredRight);
+    }
+    Context& ctx;
+    LiTime& time;
+};
+
+class LimiterEditor final : public ModuleEditor
+{
+public:
+    explicit LimiterEditor (Context& c)
+        : ModuleEditor (c, 8, "true-peak-safe look-ahead limiter, Drive pushes the level into the ceiling"), time (c), meters (c, time),
+          modes (c, "lim_mode", { "Transparent", "Balanced", "Aggressive" }, { "slow, clean, quieter", "for most mixes", "fast, loud, dense" }, "c:li.mode",
+                 [] (juce::Graphics& g, juce::Rectangle<float> r, int i)
+                 {
+                     const float att = std::array<float, 3> { 0.5f, 0.35f, 0.2f }[(size_t) i], rel = std::array<float, 3> { 0.35f, 0.2f, 0.08f }[(size_t) i];
+                     juce::Path p;
+                     for (int k = 0; k <= 40; ++k)
+                     {
+                         const float t = k / 40.0f;
+                         float v = 0.0f;
+                         if (t > 0.2f && t < 0.2f + att * 0.3f)
+                             v = (t - 0.2f) / (att * 0.3f);
+                         else if (t >= 0.2f + att * 0.3f)
+                             v = std::exp (-(t - 0.2f - att * 0.3f) / rel);
+                         const juce::Point<float> pt (r.getX() + 2.0f + t * (r.getWidth() - 4.0f), r.getY() + 3.0f + v * (r.getHeight() - 8.0f));
+                         k == 0 ? p.startNewSubPath (pt) : p.lineTo (pt);
+                     }
+                     g.setColour (col::orange);
+                     g.strokePath (p, juce::PathStrokeType (1.6f));
+                 })
+    {
+        modes.footer = "curve = how GR follows a hit";
+        auto& gr = own (std::make_unique<Painter>());
+        gr.setInterceptsMouseClicks (false, false);
+        gr.draw = [this] (juce::Graphics& g, juce::Rectangle<int> r)
+        {
+            const auto v = fmtMinus (ctx.proc.getChain().getLimiter().gainReductionDb()) + " dB";
+            const int vw = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font (12.5f, true), v)) + 4;
+            g.setColour (col::orange);
+            g.setFont (font (12.5f, true));
+            g.drawText (v, r.removeFromRight (vw), juce::Justification::centredRight);
+            g.setColour (col::text3);
+            g.setFont (font (12.5f));
+            g.drawText ("GR", r, juce::Justification::centredRight);
+        };
+        readout = &gr;
+        addRight (gr, 90);
+        relAuto.attach (ctx.apvts, "lim_rel_auto");
+        setTip (relAuto, "t:Auto release\nThe limiter sets the release time from the music.");
+        addRight (relAuto, 98);
+        for (auto* comp : { (juce::Component*) &time, (juce::Component*) &meters, (juce::Component*) &modes })
+            addAndMakeVisible (*comp);
+        auto& rel = makeKnob (*this, "lim_rel", "Release", "li.rel", clMag);
+        rel.textOverride = [this, &rel] { return ctx.param ("lim_rel_auto") >= 0.5f ? juce::String ("Auto") : ctx.apvts.getParameter (rel.getParamId())->getCurrentValueAsText(); };
+        rel.onUserChange = [this] { ctx.setParam ("lim_rel_auto", 0.0f); };
+        row = { &makeKnob (*this, "lim_drive", "Drive", "li.drive", clMag), &makeKnob (*this, "lim_ceiling", "Ceiling", "li.ceil", clMag), &rel,
+                &makeKnob (*this, "lim_lookahead", "Lookahead", "li.la", clMag), &makeKnob (*this, "lim_link", "Link", "li.link", clMag),
+                &makeKnob (*this, "lim_transient", "Transients", "li.trans", clMag) };
+    }
+    int naturalHeight (int) const override { return compact ? headH + 8 + 120 + 8 + knobH + 8 : headH + 8 + 176 + 8 + knobH + 8; }
+    void update() override
+    {
+        ModuleEditor::update();
+        time.push();
+        meters.repaint();
+        modes.repaint();
+        readout->repaint();
+    }
+    void layoutBody (juce::Rectangle<int> r) override
+    {
+        auto top = r.removeFromTop (compact ? 120 : 176);
+        meters.setVisible (! compact);
+        modes.setVisible (! compact);
+        if (! compact)
+        {
+            modes.setBounds (top.removeFromRight (206));
+            top.removeFromRight (10);
+            meters.setBounds (top.removeFromRight (150));
+            top.removeFromRight (10);
+        }
+        time.setBounds (top);
+        r.removeFromTop (8);
+        layoutKnobRow (r.removeFromTop (knobH), row);
+    }
+    LiTime time;
+    LiMeters meters;
+    ModeList modes;
+    Btn relAuto { "Auto release", true };
+    Painter* readout = nullptr;
+    std::vector<Knob*> row;
+};
+
+// ---- Output with the loudness target (mockup v15) --------------------------------------------------------
+class OutputEditor final : public ModuleEditor, private juce::Timer
+{
+public:
+    explicit OutputEditor (Context& c) : ModuleEditor (c, 9, "final gain, dither and the loudness target"), target (c, "out_target", false)
+    {
+        dither.attach (ctx.apvts, "out_dither");
+        setTip (dither, "c:out.dither");
+        bits.attach (ctx.apvts, "out_bits");
+        setTip (bits, "t:Bit depth\nThe word length the dither is made for.");
+        quality.attach (ctx.apvts, "quality");
+        setTip (quality, "t:Quality\nOversampling: Auto (2x in real time, 4x offline), Normal (2x), High (4x).");
+        addRight (quality, 124);
+        addRight (bits, 84);
+        addRight (dither, 122);
+        box = &own (std::make_unique<Painter>());
+        box->setInterceptsMouseClicks (false, false);
+        box->draw = [this] (juce::Graphics& g, juce::Rectangle<int> r) { paintBox (g, r); };
+        addAndMakeVisible (target);
+        setTip (target, "c:out.target");
+        presets.onChange = [this] (int i)
+        {
+            static const float values[] = { -14.0f, -11.0f, -9.0f, -8.0f, -6.0f, -5.0f };
+            ctx.setParam ("out_target", values[juce::jlimit (0, 5, i)]);
+        };
+        setTip (presets, "c:out.presets");
+        addAndMakeVisible (presets);
+        for (auto* b : { &reach, &stopBtn, &undoBtn })
+            addChildComponent (*b);
+        reach.setVisible (true);
+        reach.accent = true;
+        setTip (reach, "c:out.reach");
+        reach.onClick = [this] { start(); };
+        stopBtn.onClick = [this] { finish ("Stopped. Undo restores the Clipper and the Limiter.", false); };
+        undoBtn.onClick = [this] { undo(); };
+        row = { &makeKnob (*this, "out_gain", "Gain", "out.gain", col::orange, true) };
+        startTimerHz (10);
+    }
+    ~OutputEditor() override { stopTimer(); }
+    int naturalHeight (int) const override { return headH + 8 + 116 + 8 + knobH + 8; }
+
+    void update() override
+    {
+        ModuleEditor::update();
+        static const float values[] = { -14.0f, -11.0f, -9.0f, -8.0f, -6.0f, -5.0f };
+        int sel = -1;
+        for (int i = 0; i < 6; ++i)
+            if (std::abs (ctx.param ("out_target") - values[i]) < 0.05f)
+                sel = i;
+        if (sel >= 0)
+            presets.setSelected (sel, false);
+        box->repaint();
+        repaint (tpArea);
+    }
+
+    void layoutBody (juce::Rectangle<int> r) override
+    {
+        auto b = r.removeFromTop (116);
+        box->setBounds (b);
+        auto in = b.reduced (10, 6);
+        in.removeFromTop (24);
+        auto line = in.removeFromTop (26);
+        targetLabel = line.removeFromLeft (46);
+        target.setBounds (line.removeFromLeft (92).withSizeKeepingCentre (92, 22));
+        line.removeFromLeft (10);
+        presets.setBounds (line.removeFromLeft (220).withSizeKeepingCentre (220, 24));
+        line.removeFromLeft (12);
+        auto btn = line.removeFromRight (106).withSizeKeepingCentre (106, 24);
+        reach.setBounds (btn);
+        stopBtn.setBounds (btn.withSizeKeepingCentre (60, 24).withX (btn.getRight() - 60));
+        undoBtn.setBounds (btn.withSizeKeepingCentre (60, 24).withX (btn.getRight() - 60));
+        statusArea = line.withTrimmedRight (8);
+        in.removeFromTop (6);
+        noteArea = in;
+        r.removeFromTop (8);
+        auto kr = r.removeFromTop (knobH);
+        tpArea = kr.withTrimmedLeft (layoutKnobRow (kr, row) + 12).withWidth (240);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        ModuleEditor::paint (g);
+        g.setColour (col::text3);
+        g.setFont (font (12.5f));
+        g.drawText ("Out true peak", tpArea.withWidth (100), juce::Justification::centredLeft);
+        const auto tp = ctx.out().truePeak;
+        g.setColour (tp <= ctx.param ("lim_ceiling") ? col::ok : col::bad);
+        g.setFont (font (12.5f, true));
+        g.drawText (fmtLufs (tp) + " dBTP", tpArea.withTrimmedLeft (100), juce::Justification::centredLeft);
+    }
+
+private:
+    void paintBox (juce::Graphics& g, juce::Rectangle<int> r)
+    {
+        drawSectionBox (g, r.withPosition (0, 0));
+        auto in = r.withPosition (0, 0).reduced (10, 6);
+        auto title = in.removeFromTop (24);
+        g.setColour (col::text);
+        g.setFont (semibold (13.0f));
+        g.drawText ("Loudness target", title.removeFromLeft (124), juce::Justification::centredLeft);
+        g.setColour (col::text3);
+        g.setFont (font (12.5f));
+        g.drawText (tr ("the plugin sets the Clipper and the Limiter to reach it"), title, juce::Justification::centredLeft, true);
+        const auto local = [&] (juce::Rectangle<int> a) { return a - box->getPosition(); };
+        g.drawText ("Target", local (targetLabel), juce::Justification::centredLeft);
+        juce::String text = status;
+        juce::Colour c = col::text2;
+        if (state == State::idle && text.isEmpty())
+        {
+            text = tr ("Play the song, then press:");
+            c = col::text3;
+        }
+        if (state == State::running && noSignal > 1.5)
+            text = tr ("Waiting for audio. Start playback.");
+        if (state == State::done && reached)
+            c = col::ok;
+        g.setColour (c);
+        g.setFont (font (12.5f, state == State::running));
+        g.drawText (text, local (statusArea), state == State::idle && status.isEmpty() ? juce::Justification::centredRight : juce::Justification::centredLeft, true);
+        g.setColour (col::text3);
+        g.setFont (font (12.0f));
+        g.drawFittedText (tr ("The work is split: the Clipper takes up to 3 dB of the peaks, the Limiter the rest. True peak stays at the Ceiling. Louder than about -7 LUFS needs strong clipping: listen to the drums."),
+                          local (noteArea), juce::Justification::topLeft, 2);
+    }
+
+    enum class State
+    {
+        idle,
+        running,
+        done
+    };
+
+    void start()
+    {
+        snapshot.clear();
+        for (const auto* id : { "clip_on", "clip_drive", "lim_on", "lim_drive", "lim_ceiling" })
+            snapshot[id] = ctx.param (id);
+        ctx.monitoring.referenceActive = false;
+        ctx.setParam ("clip_on", 1.0f);
+        ctx.setParam ("lim_on", 1.0f);
+        ctx.setParam ("lim_ceiling", std::min (ctx.param ("lim_ceiling"), -1.0f));
+        state = State::running;
+        attempts = 0;
+        reached = false;
+        startedAt = juce::Time::getMillisecondCounterHiRes();
+        status = "Measuring the loudness";
+        restart();
+        showButtons();
+    }
+    void restart()
+    {
+        ctx.engine.requestReset();
+        waited = 0.0;
+        clipSum = 0.0;
+        clipN = 0;
+    }
+    void finish (const juce::String& msg, bool ok)
+    {
+        state = State::done;
+        reached = ok;
+        status = msg;
+        showButtons();
+    }
+    void undo()
+    {
+        for (const auto& [id, v] : snapshot)
+            ctx.setParam (id, v);
+        snapshot.clear();
+        state = State::idle;
+        status.clear();
+        showButtons();
+        if (ctx.notify)
+            ctx.notify ("The Clipper and the Limiter are back.");
+    }
+    void showButtons()
+    {
+        reach.setVisible (state != State::running && (state == State::idle || snapshot.empty()));
+        stopBtn.setVisible (state == State::running);
+        undoBtn.setVisible (state == State::done && ! snapshot.empty());
+        box->repaint();
+    }
+    void timerCallback() override
+    {
+        if (state != State::running)
+            return;
+        if (ctx.snap.out.momentary > -50.0)
+        {
+            waited += 0.1;
+            noSignal = 0.0;
+            clipSum += -ctx.proc.getChain().getClipper().peakReductionDb();
+            ++clipN;
+        }
+        else
+            noSignal += 0.1;
+        if (waited < 4.0)
+            return;
+        const double targetLufs = ctx.param ("out_target"), measured = ctx.snap.out.integrated;
+        const double err = targetLufs - measured;
+        const double clipCut = clipN > 0 ? clipSum / clipN : 0.0;
+        const auto clock = [this]
+        {
+            const int t = juce::roundToInt ((juce::Time::getMillisecondCounterHiRes() - startedAt) / 1000.0);
+            return juce::String (t / 60) + ":" + juce::String (t % 60).paddedLeft ('0', 2);
+        };
+        if (std::abs (err) <= 0.3)
+        {
+            finish ("Reached " + fmtMinus (measured) + " LUFS in " + clock() + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "Clipper Drive " + fmtSigned (ctx.param ("clip_drive"))
+                        + " dB (peaks cut " + juce::String (clipCut, 1) + " dB)" + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "Limiter Drive " + fmtSigned (ctx.param ("lim_drive")) + " dB",
+                    true);
+            return;
+        }
+        if (++attempts > 10)
+        {
+            finish ("Stopped at " + fmtMinus (measured) + " LUFS: the target cannot be reached with these settings.", false);
+            return;
+        }
+        float clipDrive = ctx.param ("clip_drive"), limDrive = ctx.param ("lim_drive");
+        const float step = (float) err * 0.9f;
+        if (step > 0.0f)
+        {
+            // the Clipper takes its share while it cuts less than 3 dB, the Limiter the rest
+            const float clipShare = clipCut < 3.0 ? std::min (step * 0.4f, (float) (3.0 - clipCut)) : 0.0f;
+            clipDrive = juce::jlimit (0.0f, 24.0f, clipDrive + clipShare);
+            limDrive = juce::jlimit (0.0f, 24.0f, limDrive + step - clipShare);
+            if (limDrive >= 23.9f && clipDrive >= 23.9f)
+            {
+                finish ("Stopped at " + fmtMinus (measured) + " LUFS: both Drives are at maximum.", false);
+                return;
+            }
+        }
+        else
+        {
+            const float fromLim = std::max (step, -limDrive);
+            limDrive += fromLim;
+            clipDrive = juce::jlimit (0.0f, 24.0f, clipDrive + (step - fromLim));
+        }
+        ctx.setParam ("clip_drive", std::round (clipDrive * 10.0f) / 10.0f);
+        ctx.setParam ("lim_drive", std::round (limDrive * 10.0f) / 10.0f);
+        status = "Now " + fmtMinus (measured) + " LUFS " + juce::String (juce::CharPointer_UTF8 ("\xe2\x86\x92")) + " target " + fmtMinus (targetLufs) + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 "))
+               + "Clipper Drive " + fmtSigned (ctx.param ("clip_drive")) + " dB" + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "Limiter Drive " + fmtSigned (ctx.param ("lim_drive")) + " dB";
+        restart();
+    }
+
+    ValueField target;
+    Segmented presets { { juce::String (juce::CharPointer_UTF8 ("\xe2\x88\x92")) + "14", juce::String (juce::CharPointer_UTF8 ("\xe2\x88\x92")) + "11",
+                          juce::String (juce::CharPointer_UTF8 ("\xe2\x88\x92")) + "9", juce::String (juce::CharPointer_UTF8 ("\xe2\x88\x92")) + "8",
+                          juce::String (juce::CharPointer_UTF8 ("\xe2\x88\x92")) + "6", juce::String (juce::CharPointer_UTF8 ("\xe2\x88\x92")) + "5" } };
+    Btn reach { "Reach target" }, stopBtn { "Stop" }, undoBtn { "Undo" };
+    Dropdown dither, bits, quality;
+    Painter* box = nullptr;
+    std::vector<Knob*> row;
+    juce::Rectangle<int> targetLabel, statusArea, noteArea, tpArea;
+    State state = State::idle;
+    bool reached = false;
+    juce::String status;
+    std::map<juce::String, float> snapshot;
+    double waited = 0.0, noSignal = 0.0, startedAt = 0.0, clipSum = 0.0;
+    int clipN = 0, attempts = 0;
+};
+
 // ---- Stereo (mockup v12) ---------------------------------------------------------------------------------
 /** Width per band: the module's setting (left axis, 0-200 %) against the measured width of your mix and
     of the reference (right axis, analysis width 0-100 %, D-033). Drag a band for its width, the yellow
@@ -2316,6 +3131,9 @@ std::unique_ptr<ModuleEditor> createModuleEditor (Context& ctx, int index)
         case 5: return std::make_unique<SaturationEditor> (ctx);
         case 3: return std::make_unique<LowEndEditor> (ctx);
         case 6: return std::make_unique<StereoEditor> (ctx);
+        case 7: return std::make_unique<ClipperEditor> (ctx);
+        case 8: return std::make_unique<LimiterEditor> (ctx);
+        case 9: return std::make_unique<OutputEditor> (ctx);
         default: break;
     }
     std::unique_ptr<GenericEditor> e;
@@ -2364,49 +3182,7 @@ std::unique_ptr<ModuleEditor> createModuleEditor (Context& ctx, int index)
             e->history ([&chain] { return chain.getBusComp().gainReductionDb(); }, 6.0f, "typical: 1-2 dB");
             break;
         }
-        case 7:
-        {
-            e = std::make_unique<GenericEditor> (ctx, 7, "shaves drum peaks before the limiter", magenta,
-                                                 std::vector<KSpec> { { "clip_thr", "Thresh", "cl.thr" }, { "clip_shape", "Shape", "cl.shape" }, { "clip_mix", "Mix", "cl.mix" } });
-            auto* ed = e.get();
-            e->knob ("clip_thr")->meterLevel = [ed, &chain]
-            {
-                if (ed->ctx.param ("clip_on") < 0.5f)
-                    return noSignal();
-                const float v = chain.getClipper().inputPeakDb();
-                return v <= -99.0f ? noSignal() : v;
-            };
-            e->readout ([&chain] { return "Peak " + fmtMinus (chain.getClipper().peakReductionDb()) + " dB"; }, 100);
-            e->toggle ("Low protect", "clip_lowprot", "c:cl.lowprot", 92);
-            e->dropdown ("clip_type", "c:cl.type", 100);
-            e->history ([&chain] { return chain.getClipper().peakReductionDb(); }, 6.0f, "");
-            break;
-        }
-        case 8:
-        {
-            e = std::make_unique<GenericEditor> (ctx, 8, "true-peak-safe look-ahead limiter", magenta,
-                                                 std::vector<KSpec> { { "lim_drive", "Drive", "li.drive" }, { "lim_ceiling", "Ceiling", "li.ceil" }, { "lim_rel", "Release", "li.rel" },
-                                                                      { "lim_lookahead", "Lookahead", "li.la" }, { "lim_link", "Link", "li.link" }, { "lim_transient", "Transients", "li.trans" } });
-            auto* ed = e.get();
-            auto* rel = e->knob ("lim_rel");
-            rel->textOverride = [ed, rel] { return ed->ctx.param ("lim_rel_auto") >= 0.5f ? juce::String ("Auto") : ed->ctx.apvts.getParameter (rel->getParamId())->getCurrentValueAsText(); };
-            rel->onUserChange = [ed] { ed->ctx.setParam ("lim_rel_auto", 0.0f); };
-            e->readout ([&chain] { return "GR " + fmtMinus (chain.getLimiter().gainReductionDb()) + " dB"; }, 90);
-            e->toggle ("Auto release", "lim_rel_auto", "t:Auto release\nThe limiter sets the release time from the music.", 98);
-            e->dropdown ("lim_mode", "c:li.mode", 116);
-            e->history ([&chain] { return chain.getLimiter().gainReductionDb(); }, 12.0f, "");
-            break;
-        }
-        default:
-        {
-            e = std::make_unique<GenericEditor> (ctx, 9, "final gain and dither", orange, std::vector<KSpec> { { "out_gain", "Gain", "out.gain", true } });
-            auto* ed = e.get();
-            e->readout ([ed] { return "TP " + fmtLufs (ed->ctx.out().truePeak); }, 80);
-            e->dropdown ("quality", "t:Quality\nOversampling: Auto (2x in real time, 4x offline), Normal (2x), High (4x).", 96);
-            e->dropdown ("out_bits", "t:Bit depth\nThe word length the dither is made for.", 84);
-            e->dropdown ("out_dither", "c:out.dither", 130);
-            break;
-        }
+        default: break;
     }
     return e;
 }

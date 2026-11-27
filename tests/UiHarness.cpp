@@ -245,7 +245,9 @@ int main (int argc, char** argv)
                            { 1280, 800, "References", false },   { 1536, 960, "References", false }, { 640, 400, "References", false },
                            { 1536, 960, "Album", false },         { 960, 600, "Eyes", true },          { 1280, 800, "Master", false, 6 },
                            { 1536, 960, "Master", false, 6 },     { 640, 400, "Master", false, 6 },
-                           { 1280, 800, "Master", false, 3 },     { 1536, 960, "Master", false, 3 }, { 640, 400, "Master", false, 3 } };
+                           { 1280, 800, "Master", false, 3 },     { 1536, 960, "Master", false, 3 }, { 640, 400, "Master", false, 3 },
+                           { 1280, 800, "Master", false, 7 },     { 1280, 800, "Master", false, 8 }, { 1280, 800, "Master", false, 9 },
+                           { 1536, 960, "Master", false, 8 } };
     int failures = 0;
     // every module editor at the reference size and at the smallest full-mode window
     for (auto [w, h] : { std::pair { 1280, 800 }, std::pair { 1000, 640 }, std::pair { 640, 400 } })

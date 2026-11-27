@@ -191,3 +191,10 @@ The Low-End editor is graphical: the low spectrum 20-300 Hz of the output (mid, 
 
 Every knob of the plugin now has an approved tooltip with advice (18 new texts in mockup v13). Knob tooltips no longer have the module section; the tooltip of a module tile still describes the module.
 
+## D-035 Clipper Drive, Limiter view and the Output loudness target (mockups v14 and v15, 2026-11-27)
+
+- **Clipper Drive** (`clip_drive`, 0 to 24 dB, new parameter appended to the list) raises the level before the clipper, so the clipper can cut much deeper than the -12 dB threshold range alone allows; the threshold range stays the same so that older automation keeps its meaning. The clipper hands a mono copy of its input (after Drive) and output to the UI through a lock-free single-producer FIFO; the editor aligns them by the clipper latency and shows 40 ms around the loudest hit of the last 0.3 s, refreshed 5 times per second. The transfer curve and the mode pictures use the DSP's own clip function.
+- **Limiter view**: the input after Drive, the output (peak per block) and the gain reduction of the last 6 s at 30 Hz, the ceiling, GR now and maximum, true peak and overs of the output; the mode pictures illustrate how fast the gain reduction recovers in each mode. The parameters are unchanged.
+- **Output loudness target** (`out_target`, -30 to -3 LUFS, default -9, not automatable, appended): Reach target measures 4 s of signal after an analysis reset and moves Drive: the Clipper takes 40 % of each step while it cuts less than 3 dB of the peaks, the Limiter the rest (ceiling at most -1 dBTP), until the integrated loudness is within 0.3 LU of the target (10 steps at most). Undo restores Clipper on, Clipper Drive, Limiter on, Limiter Drive and the ceiling.
+- The loudness target menu on the Eyes tab also offers -6 and -5 LUFS.
+
