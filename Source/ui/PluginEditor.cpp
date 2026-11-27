@@ -176,7 +176,7 @@ public:
                 if (name.endsWith (juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe"))))
                 {
                     juce::PopupMenu m;
-                    const juce::StringArray more { "Low-End", "Stereo", "Spectrogram", "Album" };
+                    const juce::StringArray more { "Low-End", "Stereo", "Spectrogram", "Album", "References" };
                     for (int i = 0; i < more.size(); ++i)
                         m.addItem (i + 1, more[i], true, editor.currentTab == more[i]);
                     m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (r)), [this, more] (int res)
@@ -346,8 +346,9 @@ MasterMindEditor::MasterMindEditor (MasterMindProcessor& p) : AudioProcessorEdit
     stereo = std::make_unique<StereoView> (ctx);
     spectrogram = std::make_unique<SpectrogramView> (ctx);
     albumView = std::make_unique<AlbumView> (ctx);
+    refsView = std::make_unique<ReferencesView> (ctx);
     for (juce::Component* c : std::initializer_list<juce::Component*> { topBar.get(), tabBar.get(), footer.get(), spectrumCompact.get(), master.get(),
-                                                                         eyes.get(), checksCompact.get(), lowEnd.get(), stereo.get(), spectrogram.get(), albumView.get() })
+                                                                         eyes.get(), checksCompact.get(), lowEnd.get(), stereo.get(), spectrogram.get(), albumView.get(), refsView.get() })
         root->addChildComponent (c);
     root->addChildComponent (bubble);
     bubble.setInterceptsMouseClicks (false, false);
@@ -448,7 +449,7 @@ void MasterMindEditor::resized()
     tabBar->setBounds (r.removeFromTop (compact ? 28 : 34));
     footer->setBounds (r.removeFromBottom (compact ? 20 : 24));
     tabBar->setTabs (compact ? juce::StringArray { "Overview", "Master", "Eyes", juce::String ("More ") + juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe")) }
-                             : juce::StringArray { "Master", "Eyes", "Low-End", "Stereo", "Spectrogram", "Album" });
+                             : juce::StringArray { "Master", "Eyes", "Low-End", "Stereo", "Spectrogram", "Album", "References" });
     if (! compact && currentTab == "Overview")
         currentTab = "Master";
     const auto preset = mm::window::presetFor (currentSize());
@@ -461,7 +462,7 @@ void MasterMindEditor::resized()
 void MasterMindEditor::layoutContent()
 {
     for (juce::Component* c : std::initializer_list<juce::Component*> { spectrumCompact.get(), master.get(), eyes.get(), checksCompact.get(),
-                                                                         lowEnd.get(), stereo.get(), spectrogram.get(), albumView.get() })
+                                                                         lowEnd.get(), stereo.get(), spectrogram.get(), albumView.get(), refsView.get() })
         c->setVisible (false);
 
     const bool compact = mode == LayoutMode::compact;
@@ -509,6 +510,12 @@ void MasterMindEditor::layoutContent()
     {
         albumView->setBounds (r);
         albumView->setVisible (true);
+    }
+    else if (t == "References")
+    {
+        refsView->setCompact (compact);
+        refsView->setBounds (r);
+        refsView->setVisible (true);
     }
     else
     {

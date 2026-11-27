@@ -150,3 +150,24 @@ The Master tab follows mockup v9 (which includes v5 to v8): spectrum, module bar
 - **Tonal advice.** The twelve approved texts (mockup v7) are generated into `TooltipText.cpp` by `tools/gen_tooltips.py`. The first step names the Dynamic EQ band that cuts a band below target ("Dynamic EQ уменьшает этот диапазон: полоса N, ...") or boosts a band above target ("Dynamic EQ поднимает этот диапазон: полоса N, ... Сделайте подъём меньше."), when there is one; the second wording follows the approved first. Without such a band, Low-mid below target starts with "Dynamic EQ: Bell 250 Hz, Q 1.0, +1 dB." A tooltip shows at most three steps. Green rows show no tooltip.
 - **Saturation transfer curve.** Drawn with the module's own shaper (`Saturation::shape`) at the band's drive, asymmetry and mix; the bright part spans the band's input peak of the last block.
 
+## D-029 Monitor block removed (user decision, mockup v10, 2026-11-27)
+
+At the user's request the Monitor block is gone from the top bar: monitor correction (6.1), system emulation (6.2) and the listen menu (mono, mid, side, band solo and delta listen from the top bar). These modes were never stored in the project, so they can no longer be switched on; their processing code stays in `Source/monitoring/` (dormant, still covered by the bit-exact safety tests) so that the feature can come back without new DSP work. Kept: reference playback with loudness-matched A/B (6.4, 7.1), chain Bypass with Match, band listen on the Low-End tab. While reference B or a band listen plays, the window keeps its red frame and a red MONITOR ON badge appears in the top bar (6.0 rule 3).
+
+## D-030 Reference library (References tab, mockup v11)
+
+A new tab next to Album keeps reference songs in a library folder (settings.json key `referenceFolder`, default `Documents\MasterMind References`). The list shows the audio files of that folder (WAV, FLAC, MP3, OGG, AIFF). Dropped or added files are copied into the folder in the background (through a temporary `.part` name, the originals stay) and analysed into the same cache as the slots, so assigning a song to a slot 1-6 is instant. Remove moves the file to the Windows Recycle Bin after a confirmation and empties any slot that holds it. Slot assignment uses the existing ReferenceLibrary (project state unchanged). The Album tab shows a guide panel (approved Russian text, ASD-STE100) when the window is at least 900 units wide.
+
+## D-031 Auto match (experimental, mockup v11)
+
+A strip at the top of the Eyes tab names the reference (the selected slot, otherwise the first ready slot in the set) and starts Auto match. It works on the live analysis of the OUT tap while the song plays, with an analysis reset and 4 s of signal per measurement:
+
+1. Undo snapshot of every parameter; B is switched off so that our mix is measured.
+2. Dynamic EQ: band 1 low shelf 60 Hz (Sub), bands 2-5 bells at 95 Hz, 270 Hz, 1 kHz, 3.5 kHz (Bass to Presence), band 10 high shelf 8 kHz (Air); dynamic off, placement Stereo, gains start at 0. These bands are overwritten.
+3. Band loop: the lowest band up to the current one that is outside +-0.9 dB of the target is corrected (gain -= 0.85 x deviation, limited to +-12 dB); when all bands up to the current one are green, the next band starts. So after every step the lower bands are checked again, as the user asked. A band that stays out of range after 5 attempts is marked and skipped.
+4. Loudness: Limiter on, ceiling at most -1 dBTP, Drive moves by 0.9 x (reference integrated - measured) until the difference is within 0.5 LU (6 attempts).
+5. Checks: Low-End mono maker (120 Hz) when mono loss or low-band correlation is not green, the resonance suppressor (2-8 kHz, 4 dB) when harshness is not green; then one more pass over the bands if the loudness step moved them.
+6. The strip reports what stays out of range. PLR usually cannot be green together with a much louder level; the report says so.
+
+Stop keeps the current knobs; Undo restores the snapshot. The order logic is checked by the layout harness (`AutoMatchStrip::nextBand`).
+

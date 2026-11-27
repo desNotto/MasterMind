@@ -11,6 +11,23 @@ const std::map<juce::String, juce::String>& russianTable()
         // headings
         add ("Spectrum", "Спектр");
         // Master workspace (mockups v5-v9)
+        add ("guide", "руководство");
+        add ("No reference. Load songs on the References tab.", "Нет референса. Загрузите песни на вкладке References.");
+        add ("Reference:", "Референс:");
+        add ("Waiting for audio. Start playback.", "Жду звук. Включите воспроизведение.");
+        add ("files", "файлов");
+        add ("click a number to put a song into a slot", "нажмите номер, чтобы поставить песню в слот");
+        add ("Folder", "Папка");
+        add ("The library is empty. Drop files below or press Add files.", "Библиотека пуста. Перетащите файлы вниз или нажмите Add files.");
+        add ("Songs with In set make the target and the corridor for the spectrum and the tonal balance. Now:", "Песни с In set задают цель и коридор для спектра и тонального баланса. Сейчас:");
+        add ("Reference library", "Библиотека референсов");
+        add ("Slots 1-6", "Слоты 1–6");
+        add ("buttons 1-6 in the top bar", "кнопки 1–6 в верхней панели");
+        add ("Drop WAV, FLAC, MP3, OGG or AIFF files here", "Перетащите сюда файлы WAV, FLAC, MP3, OGG или AIFF");
+        add ("The plugin copies them into the library folder and analyzes the whole file.", "Плагин копирует их в папку библиотеки и анализирует весь файл.");
+        add ("Release to add the files to the library", "Отпустите, чтобы добавить файлы в библиотеку");
+        add ("empty: click a number in the list", "пусто: нажмите номер в списке");
+        add ("Play the song, then press:", "Включите песню и нажмите:");
         add ("Gain reduction, last 10 s", "Ослабление (GR), последние 10 с");
         add ("All parameters of the module are here. Hover any control for advice.", "Здесь все параметры модуля. Наведите курсор на элемент, чтобы увидеть совет.");
         add ("trim, polarity and the subsonic filter", "уровень, полярность и фильтр Subsonic");

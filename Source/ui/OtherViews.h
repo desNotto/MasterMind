@@ -74,7 +74,7 @@ private:
     Context& ctx;
     Btn newAlbum { "New album..." }, openAlbum { "Open album..." }, store { "Store passport" };
     Dropdown targetMode;
-    juce::Rectangle<int> table, hints, overlay, bars;
+    juce::Rectangle<int> table, hints, overlay, bars, guide;
     int rowH = 26;
     std::unique_ptr<juce::FileChooser> chooser;
 };

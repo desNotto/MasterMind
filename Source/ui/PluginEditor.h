@@ -7,6 +7,7 @@
 #include "ui/EyesView.h"
 #include "ui/MasterView.h"
 #include "ui/OtherViews.h"
+#include "ui/ReferencesView.h"
 #include "ui/SpectrumPanel.h"
 #include "ui/TopBar.h"
 
@@ -76,6 +77,7 @@ private:
     std::unique_ptr<mm::ui::StereoView> stereo;
     std::unique_ptr<mm::ui::SpectrogramView> spectrogram;
     std::unique_ptr<mm::ui::AlbumView> albumView;
+    std::unique_ptr<mm::ui::ReferencesView> refsView;
     mm::ui::TipBubble bubble;
     juce::String currentTab = "Master";
     mm::ui::LayoutMode mode = mm::ui::LayoutMode::full;

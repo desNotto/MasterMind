@@ -72,7 +72,7 @@ public:
 
 TopBar::TopBar (Context& c) : ctx (c)
 {
-    for (auto* b : { &prev, &next, &presetBox, &save, &saveAsBtn, &bypass, &match, &monitorBox, &systemBox, &sizeBtn })
+    for (auto* b : { &prev, &next, &presetBox, &save, &saveAsBtn, &bypass, &match, &sizeBtn })
         addAndMakeVisible (*b);
     addAndMakeVisible (ab);
     for (int i = 0; i < reference::ReferenceLibrary::numSlots; ++i)
@@ -88,8 +88,6 @@ TopBar::TopBar (Context& c) : ctx (c)
     setTip (saveAsBtn, "c:pre.saveas");
     setTip (bypass, "c:bypass");
     setTip (match, "c:match");
-    setTip (monitorBox, "c:mon");
-    setTip (systemBox, "c:sys");
     setTip (ab, "c:ab");
     setTip (sizeBtn, "c:size");
 
@@ -108,8 +106,6 @@ TopBar::TopBar (Context& c) : ctx (c)
     bypass.onClick = [this] { ctx.monitoring.chainBypass = bypass.getToggleState(); };
     match.setToggleState (true, juce::dontSendNotification);
     match.onClick = [this] { ctx.monitoring.matchOn = match.getToggleState(); };
-    monitorBox.onClick = [this] { showMonitorMenu(); };
-    systemBox.onClick = [this] { showSystemMenu(); };
     ab.onChange = [this] (int i)
     {
         if (i == 1 && ctx.refs.selected() < 0)
@@ -129,7 +125,6 @@ TopBar::TopBar (Context& c) : ctx (c)
 
     ctx.presets.addChangeListener (this);
     ctx.refs.addChangeListener (this);
-    systems = monitoring::loadSystemPresets (GlobalSettings::userDataDirectory().getChildFile ("translation"), systemErrors);
 }
 
 TopBar::~TopBar()
@@ -147,7 +142,7 @@ void TopBar::changeListenerCallback (juce::ChangeBroadcaster*)
 void TopBar::setCompact (bool c)
 {
     compact = c;
-    for (auto* b : { &prev, &next, &save, &saveAsBtn, &match, &systemBox })
+    for (auto* b : { &prev, &next, &save, &saveAsBtn, &match })
         b->setVisible (! compact);
     save.setVisible (! compact && ! medium);
     saveAsBtn.setVisible (! compact && ! medium);
@@ -168,12 +163,6 @@ void TopBar::update()
         name += " *";
     presetBox.setButtonText (name);
 
-    const int slot = ctx.monitoring.correctionSlot.load();
-    const bool active = ctx.proc.monitorActive.load();
-    static const char* slotNames[] = { "Monitor: Off", "Phones", "Speakers" };
-    monitorBox.setButtonText (slot == 0 && active ? juce::String ("Listen") : juce::String (slotNames[juce::jlimit (0, 2, slot)]));
-    const int sys = ctx.monitoring.systemIndex.load();
-    systemBox.setButtonText (sys >= 0 && sys < (int) systems.size() ? systems[(size_t) sys].name : juce::String ("System: Off"));
     bypass.setToggleState (ctx.monitoring.chainBypass.load(), juce::dontSendNotification);
     ab.setSelected (ctx.monitoring.referenceActive.load() ? 1 : 0, false);
     for (auto& r : refButtons)
@@ -220,11 +209,21 @@ void TopBar::paint (juce::Graphics& g)
         g.fillRoundedRectangle (monGroup.toFloat(), 8.0f);
         g.setColour (monitorOn ? juce::Colour (0xffff6a70) : col::line);
         g.drawRoundedRectangle (monGroup.toFloat().reduced (0.5f), 8.0f, 1.0f);
-        if (monitorOn)
+        // safety badge (spec 6.0): only while reference B or a band listen plays (mockup v10)
+        g.setColour (juce::Colours::white);
+        g.setFont (font (13.0f, true));
+        auto t = monGroup.reduced (10, 0);
+        g.drawText ("MONITOR ON", t.removeFromLeft (92), juce::Justification::centredLeft);
+        if (! compact)
         {
-            g.setColour (juce::Colours::white);
-            g.setFont (font (13.0f, true));
-            g.drawText ("MONITOR ON", monGroup.withWidth (98).translated (8, 0), juce::Justification::centredLeft);
+            juce::String what;
+            if (ctx.monitoring.referenceActive.load())
+                if (const auto* ref = ctx.monitoring.currentReferenceForUi())
+                    what = "B: " + ref->name;
+            if (what.isEmpty() && ctx.monitoring.bandSolo.load() >= 0)
+                what = juce::String ("Listen: ") + analysis::tonalBandName (ctx.monitoring.bandSolo.load());
+            g.setFont (font (12.5f));
+            g.drawText (what, t.withTrimmedLeft (6), juce::Justification::centredLeft, true);
         }
     }
 
@@ -285,8 +284,7 @@ void TopBar::resized()
         r.removeFromLeft (6);
         bypass.setBounds (centreY (r.removeFromLeft (64)));
         r.removeFromLeft (6);
-        monGroup = r.removeFromLeft (ctx.proc.monitorActive.load() ? 196 : 104);
-        monitorBox.setBounds (centreY (monGroup.reduced (4, 0).removeFromRight (96)));
+        monGroup = ctx.proc.monitorActive.load() ? r.removeFromLeft (112).withSizeKeepingCentre (112, h) : juce::Rectangle<int>();
         sizeBtn.setBounds (centreY (r.removeFromRight (64)));
         r.removeFromRight (6);
         meterArea = r.getWidth() >= 150 ? r.removeFromRight (std::min (r.getWidth(), 158)).withSizeKeepingCentre (std::min (r.getWidth(), 158), h) : juce::Rectangle<int>();
@@ -319,18 +317,6 @@ void TopBar::resized()
         match.setBounds (centreY (g.removeFromLeft (56)));
     }
     r.removeFromLeft (8);
-    const bool monOn = ctx.proc.monitorActive.load();
-    const int monW = monOn ? 74 : (medium ? 88 : 92), sysW = monOn ? 80 : 96;
-    monGroup = r.removeFromLeft ((monOn ? 104 : 0) + 4 + monW + 4 + sysW + 4);
-    {
-        auto g = monGroup.reduced (4, 0);
-        if (monOn)
-            g.removeFromLeft (104);
-        monitorBox.setBounds (centreY (g.removeFromLeft (monW)));
-        g.removeFromLeft (4);
-        systemBox.setBounds (centreY (g.removeFromLeft (sysW)));
-    }
-    r.removeFromLeft (8);
     refGroup = r.removeFromLeft (4 + 6 * 24 + 4 + 48 + 4);
     {
         auto g = refGroup.reduced (4, 0);
@@ -342,6 +328,8 @@ void TopBar::resized()
         g.removeFromLeft (4);
         ab.setBounds (centreY (g.removeFromLeft (48)));
     }
+    r.removeFromLeft (8);
+    monGroup = ctx.proc.monitorActive.load() ? r.removeFromLeft (std::min (230, std::max (0, r.getWidth() - 300))) : juce::Rectangle<int>();
     sizeBtn.setBounds (centreY (r.removeFromRight (54)));
     r.removeFromRight (8);
     // meters: all three, or S-T and TP when space is short
@@ -477,136 +465,6 @@ void TopBar::saveAs()
         else if (r != presets::PresetManager::Result::ok && ctx.notify)
             ctx.notify (err);
     }), true);
-}
-
-void TopBar::showMonitorMenu()
-{
-    auto& m = ctx.monitoring;
-    auto& p = ctx.proc;
-    juce::PopupMenu menu;
-    menu.addSectionHeader ("Monitor correction");
-    menu.addItem (1, "Off", true, m.correctionSlot == 0);
-    menu.addItem (2, "Headphones" + (p.correctionFiles[0].existsAsFile() ? " (" + p.correctionFiles[0].getFileNameWithoutExtension() + ")" : juce::String (" (flat)")), true, m.correctionSlot == 1);
-    menu.addItem (3, "Speakers" + (p.correctionFiles[1].existsAsFile() ? " (" + p.correctionFiles[1].getFileNameWithoutExtension() + ")" : juce::String (" (flat)")), true, m.correctionSlot == 2);
-    menu.addItem (4, "Load Headphones profile (AutoEQ/REW .txt or IR .wav)...");
-    menu.addItem (5, "Load Speakers profile (.txt or .wav)...");
-    menu.addItem (0, ru ("\xd0\x9f\xd1\x80\xd0\xbe\xd1\x84\xd0\xb8\xd0\xbb\xd1\x8c Speakers \xd0\xbd\xd0\xb0\xd0\xb4\xd1\x91\xd0\xb6\xd0\xb5\xd0\xbd \xd1\x82\xd0\xbe\xd0\xbb\xd1\x8c\xd0\xba\xd0\xbe \xd0\xbf\xd0\xbe\xd1\x81\xd0\xbb\xd0\xb5 \xd0\xb7\xd0\xb0\xd0\xbc\xd0\xb5\xd1\x80\xd0\xb0 \xd0\xb2\xd0\xb0\xd1\x88\xd0\xb5\xd0\xb9 \xd0\xba\xd0\xbe\xd0\xbc\xd0\xbd\xd0\xb0\xd1\x82\xd1\x8b."), false);
-    juce::PopupMenu strength;
-    for (int s : { 25, 50, 75, 100 })
-        strength.addItem (100 + s, juce::String (s) + "%", true, juce::roundToInt (p.correctionStrength * 100) == s);
-    menu.addSubMenu ("Strength", strength);
-    juce::PopupMenu boost;
-    for (int b : { 0, 3, 6 })
-        boost.addItem (200 + b, "+" + juce::String (b) + " dB", true, juce::roundToInt (p.correctionBoostLimit) == b);
-    menu.addSubMenu ("Boost limit per filter", boost);
-    menu.addItem (300, "Cut only below 300 Hz", true, p.correctionCutOnly);
-
-    menu.addSectionHeader ("Listening tools");
-    static const char* listen[] = { "Stereo", "Mono", "Mid only", "Side only", "Left only", "Right only" };
-    for (int i = 0; i < 6; ++i)
-        menu.addItem (400 + i, listen[i], true, m.listenMode == i);
-    juce::PopupMenu band;
-    band.addItem (500, "Off", true, m.bandSolo < 0);
-    for (int b = 0; b < analysis::numTonalBands; ++b)
-        band.addItem (501 + b, juce::String (analysis::tonalBandName (b)) + "  " + juce::String (juce::CharPointer_UTF8 (analysis::tonalBandRange (b))), true, m.bandSolo == b);
-    menu.addSubMenu ("Band listen", band);
-    menu.addItem (600, "Delta listen (what the chain changes)", true, m.deltaListen.load());
-
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (monitorBox), [this] (int r)
-    {
-        auto& mon = ctx.monitoring;
-        auto& proc = ctx.proc;
-        if (r >= 1 && r <= 3)
-            mon.correctionSlot = r - 1;
-        else if (r == 4 || r == 5)
-        {
-            const int slot = r - 4;
-            chooser = std::make_unique<juce::FileChooser> ("Load correction profile", juce::File(), "*.txt;*.wav");
-            chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this, slot] (const juce::FileChooser& fc)
-            {
-                const auto f = fc.getResult();
-                if (! f.existsAsFile())
-                    return;
-                if (f.hasFileExtension ("txt"))
-                {
-                    monitoring::ParametricProfile prof;
-                    juce::String err;
-                    if (! monitoring::parseParametric (f.loadFileAsString(), prof, err))
-                    {
-                        if (ctx.notify)
-                            ctx.notify (err);
-                        return;
-                    }
-                }
-                ctx.proc.correctionFiles[slot] = f;
-                ctx.proc.reloadCorrection (slot);
-                ctx.monitoring.correctionSlot = slot + 1;
-                ctx.proc.syncExtraState();
-            });
-        }
-        else if (r > 100 && r <= 200)
-        {
-            proc.correctionStrength = (r - 100) / 100.0f;
-            proc.reloadCorrection (0);
-            proc.reloadCorrection (1);
-        }
-        else if (r >= 200 && r < 300)
-        {
-            proc.correctionBoostLimit = (float) (r - 200);
-            proc.reloadCorrection (0);
-            proc.reloadCorrection (1);
-        }
-        else if (r == 300)
-        {
-            proc.correctionCutOnly = ! proc.correctionCutOnly;
-            proc.reloadCorrection (0);
-            proc.reloadCorrection (1);
-        }
-        else if (r >= 400 && r < 406)
-            mon.listenMode = r - 400;
-        else if (r >= 500 && r < 507)
-            mon.bandSolo = r - 501;
-        else if (r == 600)
-            mon.deltaListen = ! mon.deltaListen.load();
-        update();
-        if (auto* p = getParentComponent())
-            p->resized();
-    });
-}
-
-void TopBar::showSystemMenu()
-{
-    juce::PopupMenu menu;
-    menu.addItem (1, "Off", true, ctx.monitoring.systemIndex < 0);
-    for (size_t i = 0; i < systems.size(); ++i)
-        menu.addItem (10 + (int) i, systems[i].name, true, ctx.monitoring.systemIndex == (int) i);
-    menu.addSeparator();
-    menu.addItem (2, "Edit emulations (JSON folder)...");
-    menu.addItem (3, "Reload emulations");
-    menu.addItem (0, ru ("\xd0\x98\xd0\xbc\xd0\xb8\xd1\x82\xd0\xb0\xd1\x86\xd0\xb8\xd0\xb8 \xe2\x80\x94 \xd0\xbf\xd1\x80\xd0\xb8\xd0\xbc\xd0\xb5\xd1\x80\xd0\xbd\xd1\x8b\xd0\xb5, \xd1\x8d\xd1\x82\xd0\xbe \xd0\xbd\xd0\xb5 \xd0\xb8\xd0\xb7\xd0\xbc\xd0\xb5\xd1\x80\xd0\xb5\xd0\xbd\xd0\xb8\xd1\x8f."), false);
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (systemBox), [this] (int r)
-    {
-        if (r == 1)
-            ctx.monitoring.systemIndex = -1;
-        else if (r >= 10 && r - 10 < (int) systems.size())
-        {
-            ctx.monitoring.setSystem (monitoring::Monitoring::buildSystem (systems[(size_t) (r - 10)], ctx.monitoring.getSampleRate()));
-            ctx.monitoring.systemIndex = r - 10;
-        }
-        else if (r == 2)
-            GlobalSettings::userDataDirectory().getChildFile ("translation").startAsProcess();
-        else if (r == 3)
-        {
-            systemErrors.clear();
-            systems = monitoring::loadSystemPresets (GlobalSettings::userDataDirectory().getChildFile ("translation"), systemErrors);
-            ctx.monitoring.systemIndex = -1;
-            if (! systemErrors.isEmpty() && ctx.notify)
-                ctx.notify (systemErrors.joinIntoString ("\n"));
-        }
-        update();
-        if (auto* p = getParentComponent())
-            p->resized();
-    });
 }
 
 void TopBar::selectRef (int slot)

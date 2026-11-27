@@ -712,9 +712,9 @@ void StereoPanel::paint (juce::Graphics& g)
 }
 
 // ---- Eyes view -------------------------------------------------------------------------------------------
-EyesView::EyesView (Context& c) : ctx (c), tonal (c), loudness (c), checks (c, false), lowEnd (c, false), stereo (c, false)
+EyesView::EyesView (Context& c) : ctx (c), autoMatch (c), tonal (c), loudness (c), checks (c, false), lowEnd (c, false), stereo (c, false)
 {
-    for (auto* p : std::initializer_list<juce::Component*> { &tonal, &loudness, &checks, &lowEnd, &stereo })
+    for (auto* p : std::initializer_list<juce::Component*> { &autoMatch, &tonal, &loudness, &checks, &lowEnd, &stereo })
         addAndMakeVisible (p);
 }
 
@@ -730,6 +730,9 @@ void EyesView::resized()
 {
     auto r = getLocalBounds();
     const int gap = 8;
+    // Auto match strip with the current reference (mockup v11)
+    autoMatch.setBounds (r.removeFromTop (36));
+    r.removeFromTop (gap);
     if (medium)
     {
         auto right = r.removeFromRight (r.getWidth() * 30 / 100);

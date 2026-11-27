@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ui/AutoMatch.h"
 #include "ui/Context.h"
 
 namespace mm::ui
@@ -98,6 +99,7 @@ public:
 
 private:
     Context& ctx;
+    AutoMatchStrip autoMatch;
     TonalPanel tonal;
     LoudnessPanel loudness;
     ChecksPanel checks;

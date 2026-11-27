@@ -1,6 +1,7 @@
 // Layout test harness (spec section 10): renders the editor at several sizes, fails if any
 // control leaves the window or overlaps a neighbouring control, and writes PNG snapshots.
 #include "PluginProcessor.h"
+#include "ui/AutoMatch.h"
 #include "ui/Locale.h"
 #include "ui/ModuleEditors.h"
 #include "ui/PluginEditor.h"
@@ -110,6 +111,29 @@ void feedAudio (MasterMindProcessor& p, double seconds)
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI gui;
+
+    // Auto match order (mockup v11): lowest failing band first, lower bands re-checked after each step
+    {
+        using AM = mm::ui::AutoMatchStrip;
+        int cur = 0, bad = 0;
+        const auto expect = [&] (std::array<double, 6> d, int want, int wantCur)
+        {
+            const int got = AM::nextBand (d, cur, 0.9);
+            if (got != want || cur != wantCur)
+            {
+                std::printf ("  auto match order: got band %d (current %d), expected %d (%d)\n", got, cur, want, wantCur);
+                ++bad;
+            }
+        };
+        expect ({ 2.9, 1.5, 0, 0, 0, 0 }, 0, 0);  // Sub first
+        expect ({ 0.2, 1.5, 0, 0, 0, 0 }, 1, 1);  // Sub green: Bass next
+        expect ({ 1.3, 0.1, 0, 0, 0, 0 }, 0, 1);  // Bass fixed but Sub broke: Sub again
+        expect ({ 0.1, 0.1, 0, -1.6, 0, 0 }, 3, 3); // Low-mid green: Mid next
+        expect ({ 0.1, 0.1, 0, 0.2, 0.3, 0.4 }, -1, 5); // all green
+        std::printf ("auto match order: %s\n", bad == 0 ? "ok" : "FAILED");
+        if (bad > 0)
+            return 1;
+    }
     const juce::File outDir = argc > 1 ? juce::File (juce::String (argv[1])) : juce::File::getCurrentWorkingDirectory().getChildFile ("ui-snapshots");
     outDir.createDirectory();
 
@@ -125,7 +149,7 @@ int main (int argc, char** argv)
                 juce::MessageManager::getInstance()->runDispatchLoopUntil (35);
                 dynamic_cast<MasterMindEditor*> (e.get())->forceUpdate();
             }
-            for (const char* tab : { "Eyes", "Low-End", "Stereo", "Spectrogram", "Album", "Master" })
+            for (const char* tab : { "Eyes", "Low-End", "Stereo", "Spectrogram", "Album", "References", "Master" })
             {
                 dynamic_cast<MasterMindEditor*> (e.get())->showTab (tab);
                 dynamic_cast<MasterMindEditor*> (e.get())->forceUpdate();
@@ -217,7 +241,9 @@ int main (int argc, char** argv)
                            { 640, 400, "Master", false, 5 },      { 1280, 800, "Low-End", false },    { 1280, 800, "Stereo", false },
                            { 1280, 800, "Spectrogram", false },   { 1280, 800, "Album", false },      { 960, 600, "Master", false, 2 },
                            { 960, 600, "Eyes", false },           { 480, 300, "Overview", false },    { 720, 460, "Master", false, 1 },
-                           { 1000, 640, "Master", false, 2 },     { 1000, 640, "Master", false, 5 },  { 3840, 2160, "Master", false, 2 } };
+                           { 1000, 640, "Master", false, 2 },     { 1000, 640, "Master", false, 5 },  { 3840, 2160, "Master", false, 2 },
+                           { 1280, 800, "References", false },   { 1536, 960, "References", false }, { 640, 400, "References", false },
+                           { 1536, 960, "Album", false },         { 960, 600, "Eyes", true } };
     int failures = 0;
     // every module editor at the reference size and at the smallest full-mode window
     for (auto [w, h] : { std::pair { 1280, 800 }, std::pair { 1000, 640 }, std::pair { 640, 400 } })
