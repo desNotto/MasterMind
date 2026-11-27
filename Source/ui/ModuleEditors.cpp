@@ -616,8 +616,9 @@ public:
             g.setFont (font (12.5f));
             g.drawText ("Res", r, juce::Justification::centredRight);
         };
-        for (auto [id, label] : { std::pair { "rs_low", "Low" }, { "rs_high", "High" }, { "rs_depth", "Depth" }, { "rs_sharp", "Sharpness" }, { "rs_speed", "Speed" }, { "rs_mix", "Mix" } })
-            resKnobs.push_back (&makeKnob (*this, id, label, {}, col::orange));
+        for (auto [id, label, tip] : { std::tuple { "rs_low", "Low", "eq.rslow" }, { "rs_high", "High", "eq.rshigh" }, { "rs_depth", "Depth", "eq.rsdepth" },
+                                       { "rs_sharp", "Sharpness", "eq.rssharp" }, { "rs_speed", "Speed", "eq.rsspeed" }, { "rs_mix", "Mix", "eq.rsmix" } })
+            resKnobs.push_back (&makeKnob (*this, id, label, tip, col::orange));
         bandBox->draw = [this] (juce::Graphics& g, juce::Rectangle<int> r)
         {
             drawSectionBox (g, r);
@@ -1602,6 +1603,416 @@ public:
     int compactBand = 0;
 };
 
+// ---- Low-End (mockup v13) --------------------------------------------------------------------------------
+const juce::Colour leBlue { 0xff4ea1ff }, leViolet { 0xffb78cff }, leCyan { 0xff7fd0ff };
+
+/** Low spectrum 20-300 Hz: mid and side of the output, the mono zone, the side after the mono maker
+    (estimated from the filter) and the handles for the mono and rotator frequencies. */
+class LeGraph final : public juce::Component
+{
+public:
+    explicit LeGraph (Context& c) : ctx (c) { setTip (*this, "c:le.graph"); }
+    float xOf (double f) const { return (float) (std::log (f / 20.0) / std::log (15.0)) * getWidth(); }
+    double fOf (float x) const { return 20.0 * std::pow (15.0, juce::jlimit (0.0, 1.0, (double) x / getWidth())); }
+    float pb() const { return getHeight() - 14.0f; }
+    float yOf (double db) const { return 8.0f + (float) ((topDb - db) / 48.0) * (pb() - 16.0f); }
+    double topDb = -8.0; // follows the loudest point of the curves (6 dB steps)
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto r = getLocalBounds().toFloat();
+        g.setColour (col::sunk);
+        g.fillRoundedRectangle (r, 6.0f);
+        const float bottom = pb();
+        g.setFont (font (10.5f));
+        for (double f : { 20.0, 30.0, 40.0, 50.0, 60.0, 80.0, 100.0, 150.0, 200.0, 300.0 })
+        {
+            const float x = xOf (f);
+            g.setColour (juce::Colour (0xff1b1f26));
+            g.drawVerticalLine ((int) x, 0.0f, bottom);
+            g.setColour (col::text3);
+            g.drawText (juce::String ((int) f), juce::Rectangle<float> (x + 2, bottom, 30, 14), juce::Justification::centredLeft);
+        }
+        const bool monoOn = ctx.param ("lem_mono_on") >= 0.5f;
+        const float monoF = ctx.param ("lem_mono_freq"), rotF = ctx.param ("lem_rot_freq");
+        const float amount = ctx.param ("lem_mono_amount") / 100.0f;
+        const int order = 1 + juce::roundToInt (ctx.param ("lem_mono_slope")); // 12, 24, 48 dB/oct -> 1, 2, 3 (x2 poles)
+        if (monoOn)
+        {
+            g.setColour (leBlue.withAlpha (0.10f));
+            g.fillRect (juce::Rectangle<float> (0.0f, 0.0f, xOf (monoF), bottom));
+            g.setColour (juce::Colour (0xff7fb3ff));
+            g.setFont (font (10.5f, true));
+            g.drawText ("MONO < " + juce::String (juce::roundToInt (monoF)) + " Hz", juce::Rectangle<float> (6.0f, 3.0f, 120.0f, 14.0f), juce::Justification::centredLeft);
+        }
+        const auto& f = ctx.snap.lowFreqs;
+        const auto& mid = ctx.snap.out.lowMid;
+        const auto& side = ctx.snap.out.lowSide;
+        {
+            float peak = -200.0f;
+            for (auto v : mid)
+                peak = std::max (peak, v);
+            for (auto v : side)
+                peak = std::max (peak, v);
+            if (peak > -150.0f)
+                topDb = std::ceil ((peak + 3.0) / 6.0) * 6.0;
+        }
+        const auto curve = [&] (const std::vector<float>& v, auto&& adjust)
+        {
+            juce::Path p;
+            for (size_t i = 0; i < v.size() && i < f.size(); ++i)
+            {
+                const float x = xOf (f[i]), y = juce::jlimit (0.0f, bottom, yOf (v[i] + adjust (f[i])));
+                i == 0 ? p.startNewSubPath (x, y) : p.lineTo (x, y);
+            }
+            return p;
+        };
+        if (! mid.empty() && ctx.snap.out.hasSignal)
+        {
+            g.setColour (col::orange);
+            g.strokePath (curve (mid, [] (double) { return 0.0; }), juce::PathStrokeType (1.8f));
+            g.setColour (col::magenta.withAlpha (0.85f));
+            g.strokePath (curve (side, [] (double) { return 0.0; }), juce::PathStrokeType (1.4f));
+            if (monoOn && ctx.param ("lem_on") >= 0.5f)
+            {
+                // side after the mono maker: low-pass share of the side removed by Amount
+                juce::Path after = curve (side, [&] (double fr)
+                {
+                    const double lp = 1.0 / std::sqrt (1.0 + std::pow (fr / monoF, order == 3 ? 16.0 : 4.0 * order)); // 12, 24, 48 dB/oct
+                    return 20.0 * std::log10 (std::max (1.0e-3, 1.0 - amount * lp));
+                });
+                juce::Path dashed;
+                const float dash[] = { 4.0f, 3.0f };
+                juce::PathStrokeType (1.2f).createDashedStroke (dashed, after, dash, 2);
+                g.setColour (col::magenta);
+                g.fillPath (dashed);
+            }
+        }
+        const auto pill = [&] (float x, float y, const juce::String& t, juce::Colour c, bool dark)
+        {
+            const float w = juce::GlyphArrangement::getStringWidth (font (10.5f, true), t) + 12.0f;
+            const juce::Rectangle<float> rr (juce::jlimit (1.0f, (float) getWidth() - w - 1.0f, x - w / 2), y, w, 16.0f);
+            g.setColour (c);
+            g.fillRoundedRectangle (rr, 4.0f);
+            g.setColour (dark ? juce::Colour (0xff06121f) : juce::Colours::white);
+            g.setFont (font (10.5f, true));
+            g.drawText (t, rr, juce::Justification::centred);
+        };
+        // rotator handle
+        if (ctx.param ("lem_rot_on") >= 0.5f)
+        {
+            const float xr = xOf (rotF);
+            const float dash[] = { 5.0f, 3.0f };
+            g.setColour (leViolet);
+            g.drawDashedLine (juce::Line<float> (xr, 0.0f, xr, bottom), dash, 2, 1.6f);
+            pill (xr, 22.0f, "Rot " + juce::String (juce::roundToInt (rotF)) + " Hz", leViolet, false);
+        }
+        // mono handle
+        {
+            const float xm = xOf (monoF);
+            g.setColour (monoOn ? leBlue : col::text3);
+            g.fillRect (xm - 1.0f, 0.0f, 2.0f, bottom);
+            static const char* slopes[] = { "12", "24", "48" };
+            pill (xm, bottom - 18.0f, "Mono " + juce::String (juce::roundToInt (monoF)) + " Hz " + juce::String (juce::CharPointer_UTF8 ("\xc2\xb7 ")) + slopes[juce::jlimit (0, 2, order - 1)]
+                                         + " dB/oct " + juce::String (juce::CharPointer_UTF8 ("\xc2\xb7 ")) + juce::String (juce::roundToInt (amount * 100.0f)) + "%",
+                  monoOn ? leBlue : col::text3, true);
+        }
+        // legend
+        auto lg = juce::Rectangle<float> ((float) getWidth() - 196.0f, 6.0f, 190.0f, 20.0f);
+        g.setColour (col::sunk);
+        g.fillRoundedRectangle (lg, 4.0f);
+        g.setColour (col::line);
+        g.drawRoundedRectangle (lg, 4.0f, 1.0f);
+        g.setFont (font (10.5f));
+        const auto item = [&] (float x, juce::Colour c, const char* t, bool dash)
+        {
+            g.setColour (c);
+            if (dash)
+            {
+                const float d[] = { 4.0f, 3.0f };
+                g.drawDashedLine (juce::Line<float> (lg.getX() + x, lg.getCentreY(), lg.getX() + x + 14.0f, lg.getCentreY()), d, 2, 1.2f);
+            }
+            else
+                g.fillRect (juce::Rectangle<float> (lg.getX() + x, lg.getCentreY() - 1.5f, 14.0f, 3.0f));
+            g.setColour (col::text2);
+            g.drawText (t, juce::Rectangle<float> (lg.getX() + x + 18.0f, lg.getY(), 60.0f, lg.getHeight()), juce::Justification::centredLeft);
+        };
+        item (8.0f, col::orange, "Mid", false);
+        item (56.0f, col::magenta, "Side", false);
+        item (104.0f, col::magenta, "Side after", true);
+        g.setColour (col::line);
+        g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+    }
+
+    juce::String handleAt (float x) const
+    {
+        if (std::abs (x - xOf (ctx.param ("lem_mono_freq"))) < 7.0f)
+            return "lem_mono_freq";
+        if (ctx.param ("lem_rot_on") >= 0.5f && std::abs (x - xOf (ctx.param ("lem_rot_freq"))) < 7.0f)
+            return "lem_rot_freq";
+        return {};
+    }
+    void mouseMove (const juce::MouseEvent& e) override { setMouseCursor (handleAt (e.position.x).isNotEmpty() ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor); }
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        drag = handleAt (e.position.x);
+        if (drag.isNotEmpty())
+            ctx.apvts.getParameter (drag)->beginChangeGesture();
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (drag.isEmpty())
+            return;
+        auto* p = ctx.apvts.getParameter (drag);
+        const auto range = p->getNormalisableRange();
+        p->setValueNotifyingHost (p->convertTo0to1 (juce::jlimit (range.start, range.end, (float) std::round (fOf (e.position.x)))));
+        repaint();
+    }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (drag.isNotEmpty())
+            ctx.apvts.getParameter (drag)->endChangeGesture();
+        drag.clear();
+    }
+    Context& ctx;
+    juce::String drag;
+};
+
+/** Phase dial (drag around it for the rotation) and the low-band waveform before (IN) and after (OUT). */
+class LePhase final : public juce::Component
+{
+public:
+    explicit LePhase (Context& c) : ctx (c) { setTip (*this, "c:le.phase"); }
+    juce::Point<float> centre() const { return { getWidth() / 2.0f, 58.0f }; }
+    void paint (juce::Graphics& g) override
+    {
+        const auto r = getLocalBounds().toFloat();
+        g.setColour (col::sunk);
+        g.fillRoundedRectangle (r, 6.0f);
+        const auto c = centre();
+        const float rad = 40.0f, angle = ctx.param ("lem_rot_angle");
+        const bool on = ctx.param ("lem_rot_on") >= 0.5f;
+        juce::Path back, arc;
+        back.addCentredArc (c.x, c.y, rad, rad, 0.0f, 0.0f, juce::MathConstants<float>::twoPi, true);
+        g.setColour (col::line2);
+        g.strokePath (back, juce::PathStrokeType (6.0f));
+        if (angle > 0.5f)
+        {
+            arc.addCentredArc (c.x, c.y, rad, rad, 0.0f, 0.0f, juce::degreesToRadians (angle), true);
+            g.setColour (on ? leViolet : col::text3);
+            g.strokePath (arc, juce::PathStrokeType (6.0f));
+        }
+        const float a = juce::degreesToRadians (angle);
+        g.setColour (col::text);
+        g.drawLine (c.x, c.y, c.x + (rad - 10.0f) * std::sin (a), c.y - (rad - 10.0f) * std::cos (a), 2.5f);
+        g.setFont (font (13.0f, true));
+        g.drawText (juce::String (juce::roundToInt (angle)) + juce::String (juce::CharPointer_UTF8 ("\xc2\xb0")), juce::Rectangle<float> (c.x - 30.0f, c.y + 6.0f, 60.0f, 16.0f), juce::Justification::centred);
+        const auto wave = [&] (const std::vector<float>& w, float y, juce::Colour col2)
+        {
+            if (w.size() < 2)
+                return;
+            float peak = 1.0e-6f;
+            for (auto v : w)
+                peak = std::max (peak, std::abs (v));
+            juce::Path p;
+            const size_t n = std::min<size_t> (w.size(), 600);
+            const size_t start = w.size() - n;
+            for (size_t i = 0; i < n; ++i)
+            {
+                const float x = 8.0f + (float) i / (float) (n - 1) * (getWidth() - 16.0f);
+                const float yy = y - w[start + i] / peak * 11.0f;
+                i == 0 ? p.startNewSubPath (x, yy) : p.lineTo (x, yy);
+            }
+            g.setColour (col2);
+            g.strokePath (p, juce::PathStrokeType (1.3f));
+        };
+        g.setFont (font (10.5f));
+        g.setColour (col::text3);
+        g.drawText ("before " + juce::String (juce::CharPointer_UTF8 ("\xc2\xb7 ")) + "peaks " + fmtSigned (ctx.snap.in.asymmetry, 0) + "%", juce::Rectangle<float> (8.0f, 106.0f, r.getWidth() - 16.0f, 14.0f), juce::Justification::centredLeft);
+        wave (ctx.snap.in.lowWave, 132.0f, col::text3);
+        g.setColour (leViolet);
+        g.drawText ("after " + juce::String (juce::CharPointer_UTF8 ("\xc2\xb7 ")) + "peaks " + fmtSigned (ctx.snap.out.asymmetry, 0) + "%", juce::Rectangle<float> (8.0f, 146.0f, r.getWidth() - 16.0f, 14.0f), juce::Justification::centredLeft);
+        wave (ctx.snap.out.lowWave, 170.0f, leViolet);
+        g.setColour (col::line);
+        g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+    }
+    float angleAt (juce::Point<float> p) const
+    {
+        const auto c = centre();
+        float deg = juce::radiansToDegrees (std::atan2 (p.x - c.x, c.y - p.y));
+        if (deg < 0.0f)
+            deg += 360.0f;
+        return std::round (deg);
+    }
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        dragging = e.position.getDistanceFrom (centre()) < 56.0f;
+        if (dragging)
+        {
+            ctx.apvts.getParameter ("lem_rot_angle")->beginChangeGesture();
+            mouseDrag (e);
+        }
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (! dragging)
+            return;
+        auto* p = ctx.apvts.getParameter ("lem_rot_angle");
+        p->setValueNotifyingHost (p->convertTo0to1 (angleAt (e.position)));
+        repaint();
+    }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (dragging)
+            ctx.apvts.getParameter ("lem_rot_angle")->endChangeGesture();
+        dragging = false;
+    }
+    Context& ctx;
+    bool dragging = false;
+};
+
+/** Translator: the strongest low note and the harmonics the module adds (2nd and 3rd from
+    Translator and 2nd/3rd), with the lower limit of a phone speaker. */
+class LeTrans final : public juce::Component
+{
+public:
+    explicit LeTrans (Context& c) : ctx (c) { setTip (*this, "c:le.transg"); }
+    float xOf (double f) const { return 8.0f + (float) (std::log (f / 20.0) / std::log (20.0)) * (getWidth() - 16.0f); }
+    void paint (juce::Graphics& g) override
+    {
+        const auto r = getLocalBounds().toFloat();
+        g.setColour (col::sunk);
+        g.fillRoundedRectangle (r, 6.0f);
+        const float base = getHeight() - 22.0f;
+        g.setFont (font (10.5f));
+        g.setColour (col::text3);
+        for (double f : { 50.0, 100.0, 200.0 })
+            g.drawText (juce::String ((int) f), juce::Rectangle<float> (xOf (f) - 15.0f, base + 4.0f, 30.0f, 14.0f), juce::Justification::centred);
+        const float dash[] = { 3.0f, 3.0f };
+        g.setColour (col::text2);
+        g.drawDashedLine (juce::Line<float> (xOf (100.0), 8.0f, xOf (100.0), base), dash, 2, 1.0f);
+        g.drawText ("phone speaker", juce::Rectangle<float> (xOf (100.0) + 4.0f, 6.0f, 100.0f, 14.0f), juce::Justification::centredLeft);
+        // strongest note 30-90 Hz in the output mid spectrum
+        double f0 = 41.2;
+        const auto& fr = ctx.snap.lowFreqs;
+        const auto& mid = ctx.snap.out.lowMid;
+        float best = -200.0f;
+        for (size_t i = 0; i < fr.size() && i < mid.size(); ++i)
+            if (fr[i] >= 30.0 && fr[i] <= 90.0 && mid[i] > best)
+            {
+                best = mid[i];
+                f0 = fr[i];
+            }
+        static const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        const int midi = juce::roundToInt (12.0 * std::log2 (f0 / 440.0) + 69.0);
+        const auto noteName = juce::String (names[((midi % 12) + 12) % 12]) + juce::String (midi / 12 - 1);
+        const bool on = ctx.param ("lem_tr_on") >= 0.5f;
+        const float amount = on ? ctx.param ("lem_tr_amount") / 100.0f : 0.0f, mix = ctx.param ("lem_tr_mix") / 100.0f;
+        const float full = base - 30.0f;
+        const auto bar = [&] (double f, float h, juce::Colour c, const juce::String& t)
+        {
+            const float x = xOf (f);
+            g.setColour (c);
+            g.fillRoundedRectangle (juce::Rectangle<float> (x - 7.0f, base - h, 14.0f, h), 2.0f);
+            g.setFont (font (10.5f));
+            g.drawText (t, juce::Rectangle<float> (x - 20.0f, base - h - 15.0f, 40.0f, 13.0f), juce::Justification::centred);
+        };
+        bar (f0, full, col::text3, noteName);
+        if (amount > 0.001f)
+        {
+            bar (2.0 * f0, std::max (3.0f, full * amount * 2.0f * (1.0f - mix)), leBlue, "2nd");
+            bar (3.0 * f0, std::max (3.0f, full * amount * 2.0f * mix), leCyan, "3rd");
+        }
+        g.setColour (col::line2);
+        g.drawHorizontalLine ((int) base, 8.0f, r.getWidth() - 8.0f);
+        g.setColour (col::line);
+        g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+    }
+    Context& ctx;
+};
+
+class LowEndEditor final : public ModuleEditor
+{
+public:
+    explicit LowEndEditor (Context& c) : ModuleEditor (c, 3, "mono maker, phase rotator, translator, drag the handles on the graph"), graph (c), phase (c), trans (c)
+    {
+        auto& readout = own (std::make_unique<Painter>());
+        readout.setInterceptsMouseClicks (false, false);
+        readout.draw = [this] (juce::Graphics& g, juce::Rectangle<int> r)
+        {
+            const float tl = ctx.proc.getChain().getLowEnd().translatorLevelDb();
+            const auto v = tl > -90.0f ? fmtMinus (tl, 0) + " dB" : juce::String (juce::CharPointer_UTF8 ("\xe2\x80\x93"));
+            const int vw = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font (12.5f, true), v)) + 4;
+            g.setColour (col::orange);
+            g.setFont (font (12.5f, true));
+            g.drawText (v, r.removeFromRight (vw), juce::Justification::centredRight);
+            g.setColour (col::text3);
+            g.setFont (font (12.5f));
+            g.drawText ("Tr", r, juce::Justification::centredRight);
+        };
+        readoutPtr = &readout;
+        addRight (readout, 70);
+        for (auto [btn, id, tip] : { std::tuple { &trBtn, "lem_tr_on", "t:Translator\nAdds harmonics to notes 30-90 Hz so that small speakers play them." },
+                                     { &rotBtn, "lem_rot_on", "t:Phase rotator\nTurns the phase of the low end so that the waveform becomes more symmetric." },
+                                     { &monoBtn, "lem_mono_on", "t:Mono maker\nMakes the low end mono below the Mono frequency." } })
+        {
+            btn->attach (ctx.apvts, id);
+            setTip (*btn, tip);
+        }
+        addRight (trBtn, 84);
+        addRight (rotBtn, 70);
+        addRight (monoBtn, 56);
+        for (auto* comp : { (juce::Component*) &graph, (juce::Component*) &phase, (juce::Component*) &trans })
+            addAndMakeVisible (*comp);
+        monoKnobs = { &makeKnob (*this, "lem_mono_freq", "Mono", "le.mono", leBlue), &makeKnob (*this, "lem_mono_slope", "Slope", "le.slope", leBlue),
+                      &makeKnob (*this, "lem_mono_amount", "Amount", "le.amount", leBlue) };
+        rotKnobs = { &makeKnob (*this, "lem_rot_freq", "Rot freq", "le.rotfreq", leViolet), &makeKnob (*this, "lem_rot_angle", "Rotate", "le.rotate", leViolet) };
+        trKnobs = { &makeKnob (*this, "lem_tr_amount", "Translator", "le.trans", leCyan), &makeKnob (*this, "lem_tr_mix", "2nd/3rd", "le.trmix", leCyan) };
+        // turning Rotate or Translator above zero switches that part on (D-022)
+        rotKnobs[1]->onUserChange = [this] { if (ctx.param ("lem_rot_angle") > 0.5f) ctx.setParam ("lem_rot_on", 1.0f); };
+        trKnobs[0]->onUserChange = [this] { if (ctx.param ("lem_tr_amount") > 0.5f) ctx.setParam ("lem_tr_on", 1.0f); };
+    }
+    int naturalHeight (int) const override { return compact ? headH + 8 + 120 + 8 + knobH + 8 : headH + 8 + 176 + 8 + knobH + 8; }
+    void update() override
+    {
+        ModuleEditor::update();
+        graph.repaint();
+        phase.repaint();
+        trans.repaint();
+        readoutPtr->repaint();
+    }
+    void layoutBody (juce::Rectangle<int> r) override
+    {
+        auto top = r.removeFromTop (compact ? 120 : 176);
+        if (compact)
+        {
+            phase.setVisible (false);
+            trans.setVisible (false);
+        }
+        else
+        {
+            trans.setBounds (top.removeFromRight (200));
+            top.removeFromRight (10);
+            phase.setBounds (top.removeFromRight (160));
+            top.removeFromRight (10);
+            phase.setVisible (true);
+            trans.setVisible (true);
+        }
+        graph.setBounds (top);
+        r.removeFromTop (8);
+        auto row = r.removeFromTop (knobH);
+        row.removeFromLeft (layoutKnobRow (row, monoKnobs) + 14);
+        row.removeFromLeft (layoutKnobRow (row, rotKnobs) + 14);
+        layoutKnobRow (row, trKnobs);
+    }
+    LeGraph graph;
+    LePhase phase;
+    LeTrans trans;
+    Btn monoBtn { "Mono", true }, rotBtn { "Rotator", true }, trBtn { "Translator", true };
+    Painter* readoutPtr = nullptr;
+    std::vector<Knob*> monoKnobs, rotKnobs, trKnobs;
+};
+
 // ---- Stereo (mockup v12) ---------------------------------------------------------------------------------
 /** Width per band: the module's setting (left axis, 0-200 %) against the measured width of your mix and
     of the reference (right axis, analysis width 0-100 %, D-033). Drag a band for its width, the yellow
@@ -1903,6 +2314,7 @@ std::unique_ptr<ModuleEditor> createModuleEditor (Context& ctx, int index)
         case 1: return std::make_unique<EqEditor> (ctx);
         case 2: return std::make_unique<MultibandEditor> (ctx);
         case 5: return std::make_unique<SaturationEditor> (ctx);
+        case 3: return std::make_unique<LowEndEditor> (ctx);
         case 6: return std::make_unique<StereoEditor> (ctx);
         default: break;
     }
@@ -1921,24 +2333,12 @@ std::unique_ptr<ModuleEditor> createModuleEditor (Context& ctx, int index)
             e->toggle (juce::String (juce::CharPointer_UTF8 ("\xc3\x98 L")), "in_pol_l", "c:in.polL", 44);
             break;
         }
-        case 3:
-        {
-            e = std::make_unique<GenericEditor> (ctx, 3, "mono maker, phase rotator, translator", blue,
-                                                 std::vector<KSpec> { { "lem_mono_freq", "Mono", "le.mono" }, { "lem_mono_slope", "Slope", "" }, { "lem_mono_amount", "Amount", "le.amount" },
-                                                                      { "lem_rot_freq", "Rot freq", "" }, { "lem_rot_angle", "Rotate", "le.rotate" },
-                                                                      { "lem_tr_amount", "Translator", "le.trans" }, { "lem_tr_mix", "2nd/3rd", "" } });
-            e->readout ([&chain] { const float tl = chain.getLowEnd().translatorLevelDb(); return tl > -90.0f ? "Tr " + fmtMinus (tl, 0) + " dB" : juce::String ("Tr -"); }, 80);
-            e->toggle ("Translator", "lem_tr_on", "t:Translator\nAdds harmonics to notes 30-90 Hz so that small speakers play them.", 84);
-            e->toggle ("Rotator", "lem_rot_on", "t:Phase rotator\nTurns the phase of the low end so that the waveform becomes more symmetric.", 70);
-            e->toggle ("Mono", "lem_mono_on", "t:Mono maker\nMakes the low end mono below the Mono frequency.", 56);
-            break;
-        }
         case 4:
         {
             e = std::make_unique<GenericEditor> (ctx, 4, "glue compressor for the whole mix", orange,
                                                  std::vector<KSpec> { { "bus_thr", "Thresh", "bc.thr" }, { "bus_ratio", "Ratio", "bc.ratio" }, { "bus_att", "Attack", "bc.attack" },
                                                                       { "bus_rel", "Release", "bc.release" }, { "bus_sc_hpf", "SC HPF", "bc.schpf" }, { "bus_mix", "Mix", "bc.mix" },
-                                                                      { "bus_detect", "Peak/RMS", "" }, { "bus_link", "Link", "" } });
+                                                                      { "bus_detect", "Peak/RMS", "bc.detect" }, { "bus_link", "Link", "bc.link" } });
             auto* ed = e.get();
             e->knob ("bus_thr")->meterLevel = [ed, &chain]
             {
@@ -1967,7 +2367,7 @@ std::unique_ptr<ModuleEditor> createModuleEditor (Context& ctx, int index)
         case 7:
         {
             e = std::make_unique<GenericEditor> (ctx, 7, "shaves drum peaks before the limiter", magenta,
-                                                 std::vector<KSpec> { { "clip_thr", "Thresh", "cl.thr" }, { "clip_shape", "Shape", "" }, { "clip_mix", "Mix", "cl.mix" } });
+                                                 std::vector<KSpec> { { "clip_thr", "Thresh", "cl.thr" }, { "clip_shape", "Shape", "cl.shape" }, { "clip_mix", "Mix", "cl.mix" } });
             auto* ed = e.get();
             e->knob ("clip_thr")->meterLevel = [ed, &chain]
             {
@@ -1986,7 +2386,7 @@ std::unique_ptr<ModuleEditor> createModuleEditor (Context& ctx, int index)
         {
             e = std::make_unique<GenericEditor> (ctx, 8, "true-peak-safe look-ahead limiter", magenta,
                                                  std::vector<KSpec> { { "lim_drive", "Drive", "li.drive" }, { "lim_ceiling", "Ceiling", "li.ceil" }, { "lim_rel", "Release", "li.rel" },
-                                                                      { "lim_lookahead", "Lookahead", "li.la" }, { "lim_link", "Link", "" }, { "lim_transient", "Transients", "" } });
+                                                                      { "lim_lookahead", "Lookahead", "li.la" }, { "lim_link", "Link", "li.link" }, { "lim_transient", "Transients", "li.trans" } });
             auto* ed = e.get();
             auto* rel = e->knob ("lim_rel");
             rel->textOverride = [ed, rel] { return ed->ctx.param ("lim_rel_auto") >= 0.5f ? juce::String ("Auto") : ed->ctx.apvts.getParameter (rel->getParamId())->getCurrentValueAsText(); };

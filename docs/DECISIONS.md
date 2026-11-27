@@ -185,3 +185,9 @@ Multiband knobs move in whole steps (dB, ms, %) and show whole numbers; Ratio mo
 
 All file and folder dialogs are owned by the plugin window (a folder dialog could disappear behind the plugin window in REAPER).
 
+## D-034 Low-End editor and tooltip completeness (mockup v13)
+
+The Low-End editor is graphical: the low spectrum 20-300 Hz of the output (mid, side and the side after the mono maker, estimated from the filter slope and Amount), the mono zone with a draggable Mono handle and a draggable Rotator handle; a phase dial (drag around it for the angle) with the low-band waveform before (IN tap) and after (OUT tap) and their peak asymmetry; the translator view with the strongest note 30-90 Hz of the output and the 2nd and 3rd harmonics the module adds (bar heights follow Translator and 2nd/3rd; an illustration, not a measurement) against the lower limit of a phone speaker (100 Hz). The vertical scale of the low spectrum follows its loudest point.
+
+Every knob of the plugin now has an approved tooltip with advice (18 new texts in mockup v13). Knob tooltips no longer have the module section; the tooltip of a module tile still describes the module.
+

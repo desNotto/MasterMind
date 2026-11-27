@@ -685,7 +685,7 @@ void fillTip (TipBubble& bubble, const juce::String& tip, juce::Component* sourc
                 std::vector<TipBubble::Section> s;
                 if (isOff (m))
                     s.push_back ({ u ("\xd0\xa1\xd1\x82\xd0\xb0\xd1\x82\xd1\x83\xd1\x81"), u ("\xd0\x9c\xd0\xbe\xd0\xb4\xd1\x83\xd0\xbb\xd1\x8c \xd0\xb2\xd1\x8b\xd0\xba\xd0\xbb\xd1\x8e\xd1\x87\xd0\xb5\xd0\xbd (Bypassed). \xd0\xa0\xd1\x83\xd1\x87\xd0\xba\xd0\xb0 \xd1\x81\xd0\xb5\xd0\xb9\xd1\x87\xd0\xb0\xd1\x81 \xd0\xbd\xd0\xb5 \xd0\xb8\xd0\xb7\xd0\xbc\xd0\xb5\xd0\xbd\xd1\x8f\xd0\xb5\xd1\x82 \xd0\xb7\xd0\xb2\xd1\x83\xd0\xba."), true });
-                s.push_back ({ u ("\xd0\x9c\xd0\xbe\xd0\xb4\xd1\x83\xd0\xbb\xd1\x8c"), modText, false });
+                juce::ignoreUnused (modText); // no module section in knob tooltips (mockup v13)
                 s.push_back ({ u ("\xd0\xa0\xd1\x83\xd1\x87\xd0\xba\xd0\xb0"), u (k.text), false });
                 if (auto* knob = dynamic_cast<Knob*> (source); knob != nullptr && knob->hasRing())
                     for (const auto& c : controls())
@@ -709,7 +709,7 @@ void fillTip (TipBubble& bubble, const juce::String& tip, juce::Component* sourc
             if (const auto* spec = params::find (knob->getParamId()))
             {
                 bubble.setContent (spec->name, params::formatValue (*spec, spec->minValue) + " \xe2\x80\xa6 " + params::formatValue (*spec, spec->maxValue),
-                                   { { u ("\xd0\x9c\xd0\xbe\xd0\xb4\xd1\x83\xd0\xbb\xd1\x8c"), moduleText (m).second, false } },
+                                   {},
                                    u ("\xd0\x94\xd0\xb2\xd0\xbe\xd0\xb9\xd0\xbd\xd0\xbe\xd0\xb9 \xd0\xba\xd0\xbb\xd0\xb8\xd0\xba \xe2\x80\x94 \xd1\x81\xd0\xb1\xd1\x80\xd0\xbe\xd1\x81 \xc2\xb7 Shift \xe2\x80\x94 \xd1\x82\xd0\xbe\xd1\x87\xd0\xbd\xd0\xbe"));
                 return;
             }
