@@ -7,6 +7,34 @@ namespace
 constexpr double bandEdges[7] = { 20.0, 60.0, 150.0, 500.0, 2000.0, 6000.0, 16000.0 };
 } // namespace
 
+void ReferenceAudio::computeOverview()
+{
+    wavePeak.assign ((size_t) waveBins, 0.0f);
+    waveRms.assign ((size_t) waveBins, 0.0f);
+    const int n = audio.getNumSamples();
+    if (n <= 0)
+        return;
+    const int chans = audio.getNumChannels();
+    for (int b = 0; b < waveBins; ++b)
+    {
+        const int from = (int) ((juce::int64) n * b / waveBins);
+        const int to = std::max (from + 1, (int) ((juce::int64) n * (b + 1) / waveBins));
+        float pk = 0.0f;
+        double sum = 0.0;
+        for (int ch = 0; ch < chans; ++ch)
+        {
+            const float* d = audio.getReadPointer (ch);
+            for (int i = from; i < std::min (to, n); ++i)
+            {
+                pk = std::max (pk, std::abs (d[i]));
+                sum += (double) d[i] * d[i];
+            }
+        }
+        wavePeak[(size_t) b] = pk;
+        waveRms[(size_t) b] = (float) std::sqrt (sum / std::max (1, (to - from) * chans));
+    }
+}
+
 void Monitoring::Chain::apply (const FilterSet* set)
 {
     applied = set;
@@ -158,15 +186,24 @@ bool Monitoring::process (juce::AudioBuffer<float>& buffer, const juce::AudioBuf
     {
         const double len = ref->audio.getNumSamples();
         refLengthSeconds.store (len / fs);
+        if (ref != lastRef)
+        {
+            // another song: keep the position when it exists in the new one (switching 1-6)
+            lastRef = ref;
+            if (refPos >= len)
+                refPos = 0.0;
+        }
         const double seek = seekRequest.exchange (-1.0);
         if (seek >= 0.0)
             refPos = std::clamp (seek * fs, 0.0, len - 1.0);
-        double loopA = refLoopStart.load() * fs, loopB = refLoopEnd.load() * fs;
+        double loopA = refLoopStart.load() * fs, loopB = std::min (len, refLoopEnd.load() * fs);
         if (loopB <= loopA + 1.0)
         {
             loopA = 0.0;
             loopB = len;
         }
+        if (refPos >= loopB || refPos < 0.0)
+            refPos = loopA;
 
         // loudness match (spec 7.1): reference gain = our loudness minus reference loudness
         double targetDb = refManualGainDb.load();

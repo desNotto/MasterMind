@@ -140,52 +140,106 @@ void Clipper::process (float* left, float* right, int numSamples) noexcept
 }
 
 // ---- Limiter -----------------------------------------------------------------------------------------
-void Limiter::Pipe::prepare (int capacity)
+void Limiter::MinWindow::prepare (int capacity)
 {
-    minVal.assign ((size_t) capacity, 1.0);
-    minIdx.assign ((size_t) capacity, 0);
-    avgBuf.assign ((size_t) capacity, 1.0);
+    val.assign ((size_t) capacity, 1.0);
+    idx.assign ((size_t) capacity, 0);
+    reset();
+}
+
+void Limiter::MinWindow::reset()
+{
+    std::fill (val.begin(), val.end(), 1.0);
+    std::fill (idx.begin(), idx.end(), 0);
+    head = tail = 0;
+}
+
+double Limiter::MinWindow::push (double v, int index, int span) noexcept
+{
+    const int cap = (int) val.size();
+    while (head != tail)
+    {
+        const int last = (tail - 1 + cap) % cap;
+        if (val[(size_t) last] < v)
+            break;
+        tail = last;
+    }
+    val[(size_t) tail] = v;
+    idx[(size_t) tail] = index;
+    tail = (tail + 1) % cap;
+    while (index - idx[(size_t) head] > span)
+        head = (head + 1) % cap;
+    return val[(size_t) head];
+}
+
+void Limiter::MinWindow::shift (int by) noexcept
+{
+    for (auto& i : idx)
+        i -= by;
+}
+
+void Limiter::Boxcar::prepare (int capacity)
+{
+    buf.assign ((size_t) capacity, 1.0);
+}
+
+void Limiter::Boxcar::reset (int length)
+{
+    len = std::clamp (length, 1, (int) buf.size());
+    std::fill (buf.begin(), buf.end(), 1.0);
+    pos = 0;
+    sum = (double) len;
+}
+
+double Limiter::Boxcar::push (double v) noexcept
+{
+    sum += v - buf[(size_t) pos];
+    buf[(size_t) pos] = v;
+    if (++pos >= len)
+        pos = 0;
+    return sum / len;
+}
+
+void Limiter::Pipe::prepare (int holdCapacity, int lookCapacity)
+{
+    hold.prepare (holdCapacity);
+    look.prepare (lookCapacity);
+    box1.prepare (lookCapacity);
+    box2.prepare (lookCapacity);
 }
 
 void Limiter::Pipe::reset (int window)
 {
-    std::fill (minVal.begin(), minVal.end(), 1.0);
-    std::fill (minIdx.begin(), minIdx.end(), 0);
-    std::fill (avgBuf.begin(), avgBuf.end(), 1.0);
-    head = tail = avgPos = 0;
-    avgSum = (double) window;
-    release = 1.0;
-    sustained = 0.0;
+    hold.reset();
+    look.reset();
+    // two cascaded moving averages spanning `window` samples in total: a smooth attack that
+    // still reaches the requirement exactly at the peak
+    const int l1 = (window + 1) / 2;
+    box1.reset (l1);
+    box2.reset (window + 1 - l1);
+    fastDb = slowDb = 0.0;
 }
 
-double Limiter::Pipe::process (double required, int index, int window, double relCoeff) noexcept
+double Limiter::processPipe (Pipe& p, double required, const Coeffs& k) const noexcept
 {
-    // release smoothing: instant down, smooth up (never above the requirement)
-    release = required < release ? required : required + relCoeff * (release - required);
+    // 1. hold: the deepest requirement of the last hold time. The gain cannot follow single cycles
+    //    of the bass, which is what turns gain riding into audible distortion.
+    const double held = p.hold.push (required, sampleIndex, k.holdSamples);
+    const double needDb = held < 1.0 ? -gainToDb (held) : 0.0;
 
-    // sliding minimum over window + 1 samples
-    const int cap = (int) minVal.size();
-    while (head != tail)
-    {
-        const int last = (tail - 1 + cap) % cap;
-        if (minVal[(size_t) last] < release)
-            break;
-        tail = last;
-    }
-    minVal[(size_t) tail] = release;
-    minIdx[(size_t) tail] = index;
-    tail = (tail + 1) % cap;
-    // window + 2 samples: both output samples around an inter-sample peak are covered
-    while (index - minIdx[(size_t) head] > window + 1)
-        head = (head + 1) % cap;
-    const double wmin = minVal[(size_t) head];
+    // 2. fast (transient) stage: instant attack, short release
+    p.fastDb = needDb > p.fastDb ? needDb : needDb + k.fastRel * (p.fastDb - needDb);
+    // 3. slow program-dependent stage: follows the average reduction. The fast stage releases only
+    //    down to this level, so dense music is not pumped and single hits recover quickly.
+    if (k.slow)
+        p.slowDb = needDb + (needDb > p.slowDb ? k.slowAtt : k.slowRel) * (p.slowDb - needDb);
+    const double envDb = std::max (p.fastDb, k.slow ? p.slowDb : 0.0);
+    const double env = envDb > 0.0 ? dbToGain (-envDb) : 1.0;
 
-    // moving average over window samples
-    avgSum += wmin - avgBuf[(size_t) avgPos];
-    avgBuf[(size_t) avgPos] = wmin;
-    if (++avgPos >= window)
-        avgPos = 0;
-    return avgSum / window;
+    // 4. look-ahead: minimum over window + 2 samples, so both output samples around an
+    //    inter-sample peak are covered, then the S-shaped attack
+    const double wmin = p.look.push (env, sampleIndex, lookahead + 1);
+    return p.box2.push (p.box1.push (wmin));
 }
 
 void Limiter::prepare (const Context& ctx)
@@ -193,12 +247,12 @@ void Limiter::prepare (const Context& ctx)
     fs = ctx.sampleRate;
     maxBlock = ctx.maxBlock;
     maxLookahead = (int) std::ceil (0.005 * fs) + 2;
+    maxHold = (int) std::ceil (0.03 * fs) + 2;
     for (auto& p : pipes)
-        p.prepare (maxLookahead + 4);
+        p.prepare (maxHold + 4, maxLookahead + 4);
     for (auto& d : delayBuf)
         d.assign ((size_t) (maxLookahead + TruePeakDetector8::latency() + 2), 0.0f);
     grTrace.assign ((size_t) maxBlock, 0.0f);
-    sustainedCoeff = Envelope::coeff (fs, 1000.0);
     reset();
 }
 
@@ -227,8 +281,21 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
     // internal target slightly below the ceiling leaves room for the interpolation error
     const double ceiling = dbToGain (settings.ceilingDb - 0.15);
     const double hardCeiling = dbToGain (settings.ceilingDb);
-    static constexpr double baseRelease[] = { 150.0, 80.0, 35.0 };
-    const double base = baseRelease[std::clamp (settings.mode, 0, 2)];
+    // per mode (Transparent, Balanced, Aggressive): hold, fast release, slow attack and release.
+    // Every hold is longer than half a period of 40 Hz, so the bass of drop tunings is not modulated.
+    static constexpr double holdMs[] = { 25.0, 18.0, 13.0 };
+    static constexpr double fastMs[] = { 120.0, 60.0, 25.0 };
+    static constexpr double slowAttMs[] = { 250.0, 350.0, 500.0 };
+    static constexpr double slowRelMs[] = { 900.0, 700.0, 500.0 };
+    const int m = std::clamp (settings.mode, 0, 2);
+    const double tr = std::clamp ((double) settings.transient, 0.0, 1.0);
+    Coeffs k;
+    k.holdSamples = std::clamp ((int) std::lround (holdMs[m] * 0.001 * fs), 0, maxHold);
+    k.slow = settings.releaseAuto;
+    // Transients: drum hits pass the slow stage and the fast stage recovers sooner after them
+    k.fastRel = Envelope::coeff (fs, (settings.releaseAuto ? fastMs[m] : (double) settings.releaseMs) * (1.0 - 0.6 * tr));
+    k.slowAtt = Envelope::coeff (fs, slowAttMs[m] * (1.0 + 2.0 * tr));
+    k.slowRel = Envelope::coeff (fs, slowRelMs[m]);
     const double link = settings.link;
 
     const int delay = lookahead + TruePeakDetector8::latency();
@@ -252,18 +319,8 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
         double gains[2];
         for (int c = 0; c < 2; ++c)
         {
-            auto& p = pipes[(size_t) c];
             const double pk = link * linked + (1.0 - link) * peak[c];
-            const double required = pk > ceiling ? ceiling / pk : 1.0;
-
-            // program-dependent release: longer when the reduction is sustained
-            const double grDb = -gainToDb (p.release);
-            p.sustained = grDb + sustainedCoeff * (p.sustained - grDb);
-            double relMs = settings.releaseAuto ? base * (1.0 + 3.0 * std::clamp (p.sustained / 6.0, 0.0, 1.0))
-                                                : (double) settings.releaseMs;
-            if (grDb - p.sustained > 2.0) // a short spike above the program level: fast transient stage
-                relMs *= 1.0 - 0.7 * settings.transient;
-            gains[c] = p.process (required, sampleIndex, lookahead, Envelope::coeff (fs, relMs));
+            gains[c] = processPipe (pipes[(size_t) c], pk > ceiling ? ceiling / pk : 1.0, k);
         }
 
         int r = delayPos - delay;
@@ -289,8 +346,10 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
         {
             // keep indices small; the deque only compares differences
             for (auto& p : pipes)
-                for (auto& idx : p.minIdx)
-                    idx -= (1 << 29);
+            {
+                p.hold.shift (1 << 29);
+                p.look.shift (1 << 29);
+            }
             sampleIndex -= (1 << 29);
         }
     }

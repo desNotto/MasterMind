@@ -153,16 +153,36 @@ public:
         ref->shortTerm = shortTerm;
         ref->integrated = integrated;
         ref->name = file.getFileNameWithoutExtension();
+        ref->file = file;
         ref->slot = index;
+        if (ok && ref->shortTerm.empty())
+        {
+            // library preview: loudness curve from the analysis cache, when the song is analysed
+            const auto v = juce::JSON::parse (owner.cacheFileFor (file).loadFileAsString());
+            if (const auto a = TrackAnalysis::fromJson (v))
+            {
+                ref->shortTerm = a->shortTerm;
+                ref->integrated = a->integrated;
+            }
+        }
+        if (ok)
+            ref->computeOverview();
         auto* raw = ok ? ref.release() : nullptr;
-        juce::MessageManager::callAsync ([w = std::weak_ptr<bool> (alive), o = &owner, i = index, raw]
+        juce::MessageManager::callAsync ([w = std::weak_ptr<bool> (alive), o = &owner, i = index, f = file, raw]
         {
             std::unique_ptr<monitoring::ReferenceAudio> r (raw);
             if (w.expired())
                 return;
             o->playbackLoading = false;
-            if (r != nullptr && o->selectedSlot == i)
+            if (r != nullptr && i >= 0 && o->selectedSlot == i && o->previewFile == juce::File())
                 o->monitoring.setReference (std::move (r));
+            else if (r != nullptr && i < 0 && o->previewFile == f)
+            {
+                o->monitoring.setReference (std::move (r));
+                o->monitoring.seekRequest = 0.0;
+                o->monitoring.referenceActive = true;
+                o->monitoring.refPlaying = true;
+            }
             o->sendChangeMessage();
         });
         return jobHasFinished;
@@ -227,7 +247,7 @@ void ReferenceLibrary::finished (int index, const juce::File& file, std::optiona
         s.error = error;
     }
     recomputeTarget();
-    if (selectedSlot == index)
+    if (selectedSlot == index && previewFile == juce::File())
         select (index);
     sendChangeMessage();
 }
@@ -237,8 +257,10 @@ void ReferenceLibrary::clear (int index)
     if (index < 0 || index >= numSlots)
         return;
     slots[(size_t) index] = Slot {};
-    if (selectedSlot == index)
+    if (selectedSlot == index && previewFile == juce::File())
         select (-1);
+    else if (selectedSlot == index)
+        selectedSlot = -1; // a library preview keeps playing
     recomputeTarget();
     sendChangeMessage();
 }
@@ -252,9 +274,20 @@ void ReferenceLibrary::setInSet (int index, bool inSet)
     sendChangeMessage();
 }
 
+void ReferenceLibrary::preview (const juce::File& file)
+{
+    if (! file.existsAsFile())
+        return;
+    previewFile = file;
+    playbackLoading = true;
+    pool.addJob (new DecodeJob (*this, -1, file, monitoring.getSampleRate(), {}, -100.0), true);
+    sendChangeMessage();
+}
+
 void ReferenceLibrary::select (int index)
 {
     selectedSlot = index;
+    previewFile = juce::File();
     if (index < 0 || slots[(size_t) index].state != State::ready)
     {
         monitoring.setReference (nullptr);

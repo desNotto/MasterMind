@@ -371,6 +371,128 @@ TEST_CASE ("Limiter true peak stays at or below the ceiling + 0.05 dB with +24 d
         }
 }
 
+namespace
+{
+/** Amplitude of `freq` in channel 0 over [from, from + len) (Goertzel, Hann window). */
+double toneAmp (const juce::AudioBuffer<float>& b, double fs, double freq, int from, int len)
+{
+    double re = 0.0, im = 0.0, wsum = 0.0;
+    for (int i = 0; i < len; ++i)
+    {
+        const double w = 0.5 - 0.5 * std::cos (twoPi * i / (len - 1));
+        const double x = b.getSample (0, from + i) * w;
+        re += x * std::cos (twoPi * freq * i / fs);
+        im -= x * std::sin (twoPi * freq * i / fs);
+        wsum += w;
+    }
+    return 2.0 * std::sqrt (re * re + im * im) / wsum;
+}
+
+juce::AudioBuffer<float> limitSine (int mode, double freq, double amp, float driveDb, double fs, int n)
+{
+    Host h;
+    h.set ("lim_on", 1.0f);
+    h.set ("lim_drive", driveDb);
+    h.set ("lim_ceiling", -1.0f);
+    h.set ("lim_mode", (float) mode);
+    h.chain.prepare (fs, 512, false);
+    juce::AudioBuffer<float> b (2, n);
+    for (int i = 0; i < n; ++i)
+    {
+        const float v = (float) (amp * std::sin (twoPi * freq * i / fs));
+        b.setSample (0, i, v);
+        b.setSample (1, i, v);
+    }
+    mmtest::runChain (h, b, 512);
+    return b;
+}
+} // namespace
+
+TEST_CASE ("Limiter keeps low distortion on a bass sine with deep gain reduction", "[dsp][limiter]")
+{
+    // A 55 Hz sine at -6 dBFS with +12 dB drive needs about 7 dB of gain reduction. A limiter whose
+    // gain follows the waveform modulates the bass and produces harmonics ("crackle"); the hold
+    // stage keeps the gain steady over the bass period (D-036).
+    const double fs = 48000.0;
+    const int n = (int) fs * 4;
+    for (int mode : { 0, 1, 2 })
+    {
+        const auto b = limitSine (mode, 55.0, 0.5, 12.0f, fs, n);
+        const int from = n / 2, len = n / 2;
+        const double fund = toneAmp (b, fs, 55.0, from, len);
+        double harm = 0.0;
+        for (int k = 2; k <= 12; ++k)
+            harm += std::pow (toneAmp (b, fs, 55.0 * k, from, len), 2.0);
+        const double thd = std::sqrt (harm) / fund;
+        INFO ("mode " << mode << " THD " << 100.0 * thd << " % fundamental " << 20.0 * std::log10 (fund));
+        CHECK (thd < 0.003); // below 0.3 %
+        CHECK (20.0 * std::log10 (fund) > -1.6); // the sine is limited to the ceiling, not below it
+    }
+}
+
+TEST_CASE ("Limiter does not modulate a guitar tone with the bass", "[dsp][limiter]")
+{
+    // 50 Hz bass plus a 1 kHz tone, 6 dB of gain reduction: gain that follows the bass waveform
+    // puts sidebands at 1 kHz +- 100 Hz on the tone (intermodulation, heard as crackle on guitars)
+    const double fs = 48000.0;
+    const int n = (int) fs * 4;
+    for (int mode : { 0, 1, 2 })
+    {
+        Host h;
+        h.set ("lim_on", 1.0f);
+        h.set ("lim_drive", 10.0f);
+        h.set ("lim_ceiling", -1.0f);
+        h.set ("lim_mode", (float) mode);
+        h.chain.prepare (fs, 512, false);
+        juce::AudioBuffer<float> b (2, n);
+        for (int i = 0; i < n; ++i)
+        {
+            const float v = (float) (0.45 * std::sin (twoPi * 50.0 * i / fs) + 0.15 * std::sin (twoPi * 1000.0 * i / fs));
+            b.setSample (0, i, v);
+            b.setSample (1, i, v);
+        }
+        mmtest::runChain (h, b, 512);
+        const int from = n / 2, len = n / 2;
+        const double tone = toneAmp (b, fs, 1000.0, from, len);
+        double side = 0.0;
+        for (double f : { 900.0, 1100.0, 800.0, 1200.0 })
+            side += std::pow (toneAmp (b, fs, f, from, len), 2.0);
+        const double imd = std::sqrt (side) / tone;
+        INFO ("mode " << mode << " IMD " << 100.0 * imd << " %");
+        CHECK (imd < 0.003);
+    }
+}
+
+TEST_CASE ("Limiter recovers from a single short peak without a long hole", "[dsp][limiter]")
+{
+    // a quiet 1 kHz tone with one 3 ms burst 12 dB over the ceiling: the slow stage must not hold
+    // the reduction long after a single drum hit
+    const double fs = 48000.0;
+    const int n = (int) fs * 2;
+    for (int mode : { 0, 1, 2 })
+    {
+        Host h;
+        h.set ("lim_on", 1.0f);
+        h.set ("lim_ceiling", -1.0f);
+        h.set ("lim_mode", (float) mode);
+        h.chain.prepare (fs, 512, false);
+        juce::AudioBuffer<float> b (2, n);
+        for (int i = 0; i < n; ++i)
+        {
+            double v = 0.1 * std::sin (twoPi * 1000.0 * i / fs);
+            if (i >= (int) fs / 2 && i < (int) fs / 2 + 144)
+                v *= 36.0;
+            b.setSample (0, i, (float) v);
+            b.setSample (1, i, (float) v);
+        }
+        mmtest::runChain (h, b, 512);
+        const double before = toneAmp (b, fs, 1000.0, (int) (0.2 * fs), 4800);
+        const double after = toneAmp (b, fs, 1000.0, (int) (1.2 * fs), 4800); // 700 ms after the peak
+        INFO ("mode " << mode << " level after the peak " << 20.0 * std::log10 (after / before) << " dB");
+        CHECK (after / before > std::pow (10.0, -1.0 / 20.0));
+    }
+}
+
 TEST_CASE ("Automating every continuous parameter causes no clicks", "[dsp][automation]")
 {
     const double fs = 48000.0;

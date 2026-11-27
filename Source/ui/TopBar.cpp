@@ -18,7 +18,7 @@ public:
     void paint (juce::Graphics& g) override
     {
         const auto& slot = owner.ctx.refs.slot (index);
-        const bool selected = owner.ctx.refs.selected() == index;
+        const bool selected = owner.ctx.refs.selected() == index && owner.ctx.refs.previewing() == juce::File();
         auto r = getLocalBounds().toFloat().reduced (0.5f);
         if (selected && slot.state == reference::ReferenceLibrary::State::ready)
         {
@@ -168,7 +168,6 @@ void TopBar::update()
     for (auto& r : refButtons)
         r->repaint();
     repaint (meterArea);
-    repaint (monGroup.expanded (4));
 }
 
 void TopBar::paint (juce::Graphics& g)
@@ -194,7 +193,6 @@ void TopBar::paint (juce::Graphics& g)
         g.drawText ("Mind", logoArea.withTrimmedLeft (juce::roundToInt (juce::GlyphArrangement::getStringWidth (font (17.0f, true), "Master"))), juce::Justification::centredLeft);
     }
 
-    const bool monitorOn = ctx.proc.monitorActive.load();
     for (auto r : { presetGroup, abGroup, refGroup, meterArea })
         if (! r.isEmpty())
         {
@@ -203,29 +201,6 @@ void TopBar::paint (juce::Graphics& g)
             g.setColour (col::line);
             g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 8.0f, 1.0f);
         }
-    if (! monGroup.isEmpty())
-    {
-        g.setColour (monitorOn ? col::mon : col::panel);
-        g.fillRoundedRectangle (monGroup.toFloat(), 8.0f);
-        g.setColour (monitorOn ? juce::Colour (0xffff6a70) : col::line);
-        g.drawRoundedRectangle (monGroup.toFloat().reduced (0.5f), 8.0f, 1.0f);
-        // safety badge (spec 6.0): only while reference B or a band listen plays (mockup v10)
-        g.setColour (juce::Colours::white);
-        g.setFont (font (13.0f, true));
-        auto t = monGroup.reduced (10, 0);
-        g.drawText ("MONITOR ON", t.removeFromLeft (92), juce::Justification::centredLeft);
-        if (! compact)
-        {
-            juce::String what;
-            if (ctx.monitoring.referenceActive.load())
-                if (const auto* ref = ctx.monitoring.currentReferenceForUi())
-                    what = "B: " + ref->name;
-            if (what.isEmpty() && ctx.monitoring.bandSolo.load() >= 0)
-                what = juce::String ("Listen: ") + analysis::tonalBandName (ctx.monitoring.bandSolo.load());
-            g.setFont (font (12.5f));
-            g.drawText (what, t.withTrimmedLeft (6), juce::Justification::centredLeft, true);
-        }
-    }
 
     // meters: S-T, TP, PLR (out tap)
     if (! meterArea.isEmpty())
@@ -284,7 +259,6 @@ void TopBar::resized()
         r.removeFromLeft (6);
         bypass.setBounds (centreY (r.removeFromLeft (64)));
         r.removeFromLeft (6);
-        monGroup = ctx.proc.monitorActive.load() ? r.removeFromLeft (112).withSizeKeepingCentre (112, h) : juce::Rectangle<int>();
         sizeBtn.setBounds (centreY (r.removeFromRight (64)));
         r.removeFromRight (6);
         meterArea = r.getWidth() >= 150 ? r.removeFromRight (std::min (r.getWidth(), 158)).withSizeKeepingCentre (std::min (r.getWidth(), 158), h) : juce::Rectangle<int>();
@@ -329,7 +303,6 @@ void TopBar::resized()
         ab.setBounds (centreY (g.removeFromLeft (48)));
     }
     r.removeFromLeft (8);
-    monGroup = ctx.proc.monitorActive.load() ? r.removeFromLeft (std::min (230, std::max (0, r.getWidth() - 300))) : juce::Rectangle<int>();
     sizeBtn.setBounds (centreY (r.removeFromRight (54)));
     r.removeFromRight (8);
     // meters: all three, or S-T and TP when space is short
@@ -469,9 +442,19 @@ void TopBar::saveAs()
 
 void TopBar::selectRef (int slot)
 {
-    ctx.refs.select (slot);
+    // 1-6 only switch the reference: B and playback stay as they are (D-036)
+    if (ctx.refs.selected() != slot || ctx.refs.previewing() != juce::File())
+        ctx.refs.select (slot);
+    update();
+}
+
+void TopBar::playRef (int slot, bool fromStart)
+{
+    selectRef (slot);
     ctx.monitoring.referenceActive = true;
     ctx.monitoring.refPlaying = true;
+    if (fromStart)
+        ctx.monitoring.seekRequest = 0.0;
     update();
 }
 
@@ -499,7 +482,9 @@ void TopBar::showRefMenu (int slot)
     menu.addItem (2, "Clear", s.state != reference::ReferenceLibrary::State::empty);
     menu.addItem (3, "In reference set (target and corridor)", s.state == reference::ReferenceLibrary::State::ready, s.inSet);
     menu.addSeparator();
-    menu.addItem (4, ctx.monitoring.refPlaying ? "Pause" : "Play", s.state == reference::ReferenceLibrary::State::ready);
+    const bool playingThis = ctx.monitoring.referenceActive.load() && ctx.monitoring.refPlaying.load() && ctx.refs.selected() == slot
+                             && ctx.refs.previewing() == juce::File();
+    menu.addItem (4, playingThis ? "Pause" : "Play", s.state == reference::ReferenceLibrary::State::ready);
     menu.addItem (5, "Play from start", s.state == reference::ReferenceLibrary::State::ready);
     juce::PopupMenu matchMenu;
     matchMenu.addItem (10, "Auto: current section (short-term)", true, ctx.monitoring.refMatchMode == 0);
@@ -520,16 +505,13 @@ void TopBar::showRefMenu (int slot)
             ctx.refs.setInSet (slot, ! ctx.refs.slot (slot).inSet);
         else if (r == 4)
         {
-            if (ctx.refs.selected() != slot)
-                selectRef (slot);
-            else
+            if (ctx.refs.selected() == slot && ctx.refs.previewing() == juce::File() && mon.referenceActive.load())
                 mon.refPlaying = ! mon.refPlaying.load();
+            else
+                playRef (slot, false);
         }
         else if (r == 5)
-        {
-            selectRef (slot);
-            mon.seekRequest = 0.0;
-        }
+            playRef (slot, true);
         else if (r >= 10 && r <= 12)
             mon.refMatchMode = r - 10;
         ctx.proc.syncExtraState();

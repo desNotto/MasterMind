@@ -4,7 +4,7 @@
 
 namespace mm::ui
 {
-/** Top bar (mockup v10): logo, presets, Bypass/Match, references with A/B, the MONITOR ON badge, meters and
+/** Top bar (mockup v10, D-036): logo, presets, Bypass/Match, references with A/B, meters and
     the size button. In compact mode it shows a reduced set. */
 class TopBar final : public juce::Component, public juce::FileDragAndDropTarget, private juce::ChangeListener
 {
@@ -31,6 +31,7 @@ private:
     void showRefMenu (int slot);
     void saveAs();
     void selectRef (int slot);
+    void playRef (int slot, bool fromStart);
     void loadRefFile (int slot);
 
     Context& ctx;
@@ -41,7 +42,7 @@ private:
     std::vector<std::unique_ptr<RefButton>> refButtons;
     Segmented ab { { "A", "B" } };
     Btn sizeBtn { "100%" };
-    juce::Rectangle<int> logoArea, presetGroup, abGroup, monGroup, refGroup, meterArea;
+    juce::Rectangle<int> logoArea, presetGroup, abGroup, refGroup, meterArea;
     std::unique_ptr<juce::FileChooser> chooser;
 };
 } // namespace mm::ui

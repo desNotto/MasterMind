@@ -731,7 +731,7 @@ void EyesView::resized()
     auto r = getLocalBounds();
     const int gap = 8;
     // Auto match strip with the current reference (mockup v11)
-    autoMatch.setBounds (r.removeFromTop (36));
+    autoMatch.setBounds (r.removeFromTop (42));
     r.removeFromTop (gap);
     if (medium)
     {

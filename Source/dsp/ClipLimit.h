@@ -77,26 +77,55 @@ public:
     const float* lastGainReduction() const noexcept { return grTrace.data(); }
 
 private:
-    /** Release-smoothed required gain -> sliding minimum (look-ahead + 1) -> moving average
-        (look-ahead). The output gain never exceeds the requirement at a peak. */
-    struct Pipe
+    /** Sliding minimum over the last span + 1 samples (monotonic deque, O(1) amortized). */
+    struct MinWindow
     {
-        std::vector<double> minVal, avgBuf;
-        std::vector<int> minIdx;
-        int head = 0, tail = 0, avgPos = 0;
-        double avgSum = 0.0, release = 1.0, sustained = 0.0;
+        std::vector<double> val;
+        std::vector<int> idx;
+        int head = 0, tail = 0;
         void prepare (int capacity);
-        void reset (int window);
-        double process (double required, int index, int window, double relCoeff) noexcept;
+        void reset();
+        double push (double v, int index, int span) noexcept;
+        void shift (int by) noexcept;
     };
 
+    /** Moving average over len samples. */
+    struct Boxcar
+    {
+        std::vector<double> buf;
+        int pos = 0, len = 1;
+        double sum = 0.0;
+        void prepare (int capacity);
+        void reset (int length);
+        double push (double v) noexcept;
+    };
+
+    /** Gain computer of one channel (D-036): hold -> fast release (transient stage) and a slow
+        program-dependent stage (the deeper of the two wins) -> look-ahead minimum -> two cascaded
+        moving averages (smooth S-shaped attack). The gain never exceeds the requirement at a peak. */
+    struct Pipe
+    {
+        MinWindow hold, look;
+        Boxcar box1, box2;
+        double fastDb = 0.0, slowDb = 0.0;
+        void prepare (int holdCapacity, int lookCapacity);
+        void reset (int window);
+    };
+
+    struct Coeffs
+    {
+        int holdSamples = 0;
+        double fastRel = 0.0, slowAtt = 0.0, slowRel = 0.0;
+        bool slow = true;
+    };
+    double processPipe (Pipe& p, double required, const Coeffs& k) const noexcept;
+
     double fs = 48000.0;
-    int maxBlock = 512, lookahead = 96, maxLookahead = 480, sampleIndex = 0;
+    int maxBlock = 512, lookahead = 96, maxLookahead = 480, maxHold = 2400, sampleIndex = 0;
     std::array<TruePeakDetector8, 2> detector;
     std::array<std::vector<float>, 2> delayBuf;
     int delayPos = 0;
     std::array<Pipe, 2> pipes;
-    double sustainedCoeff = 0.0;
     Ramp drive;
     Meter grMeter, inMeter, outMeter;
     std::vector<float> grTrace;

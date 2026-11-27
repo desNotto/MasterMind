@@ -63,9 +63,35 @@ public:
             }
             g.setColour (juce::Colour (0xff1f232b));
             g.drawHorizontalLine (row.getBottom() - 1, 0.0f, (float) getWidth());
-            g.setColour (col::text);
+            // play / pause (D-036)
+            {
+                const auto pr = playRect (i).toFloat();
+                const int st = playState (it.file);
+                g.setColour (st == 2 ? col::magenta : (hoverPlay == i ? col::panel2.brighter (0.15f) : col::panel2));
+                g.fillEllipse (pr);
+                g.setColour (st == 2 ? col::magenta : col::line2);
+                g.drawEllipse (pr.reduced (0.5f), 1.0f);
+                g.setColour (st == 2 ? juce::Colours::white : col::text);
+                if (st == 2) // pause bars
+                {
+                    g.fillRect (juce::Rectangle<float> (pr.getCentreX() - 4.0f, pr.getCentreY() - 5.0f, 3.0f, 10.0f));
+                    g.fillRect (juce::Rectangle<float> (pr.getCentreX() + 1.0f, pr.getCentreY() - 5.0f, 3.0f, 10.0f));
+                }
+                else if (st == 3) // loading
+                {
+                    g.setFont (font (12.0f, true));
+                    g.drawText (juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xa6")), pr, juce::Justification::centred);
+                }
+                else
+                {
+                    juce::Path tri;
+                    tri.addTriangle (pr.getCentreX() - 3.0f, pr.getCentreY() - 5.5f, pr.getCentreX() - 3.0f, pr.getCentreY() + 5.5f, pr.getCentreX() + 5.5f, pr.getCentreY());
+                    g.fillPath (tri);
+                }
+            }
+            g.setColour (playState (it.file) >= 1 ? col::magenta : col::text);
             g.setFont (semibold (13.0f));
-            g.drawText (it.file.getFileName(), row.withRight (cols.length - 8).withTrimmedLeft (4), juce::Justification::centredLeft, true);
+            g.drawText (it.file.getFileName(), row.withRight (cols.length - 8).withTrimmedLeft (nameX), juce::Justification::centredLeft, true);
             g.setFont (font (13.0f, true));
             if (! owner.compact)
                 g.drawText (timeText (it.seconds), juce::Rectangle<int> (cols.length, row.getY(), 54, rowH), juce::Justification::centredRight);
@@ -133,6 +159,20 @@ public:
 
     static juce::Rectangle<float> chipRect (const Columns& c, int row, int k) { return { (float) (c.slots + k * 25), row * rowH + (rowH - 22) / 2.0f, 22.0f, 22.0f }; }
     static juce::Rectangle<int> delRect (const Columns& c, int row) { return { c.del, row * rowH + (rowH - 22) / 2, 24, 22 }; }
+    static juce::Rectangle<int> playRect (int row) { return { 6, row * rowH + (rowH - 24) / 2, 24, 24 }; }
+    static constexpr int nameX = 38;
+
+    /** 0 idle, 1 B holds this song (paused), 2 playing, 3 loading. */
+    int playState (const juce::File& f) const
+    {
+        auto& mon = owner.ctx.monitoring;
+        const auto* ref = mon.currentReferenceForUi();
+        if (owner.ctx.refs.isLoadingPlayback() && owner.ctx.refs.previewing() == f)
+            return 3;
+        if (mon.referenceActive.load() && ref != nullptr && ref->file == f)
+            return mon.refPlaying.load() ? 2 : 1;
+        return 0;
+    }
 
     int rowAt (int y) const { return y / rowH; }
 
@@ -147,6 +187,8 @@ public:
             for (int k = 0; k < 6; ++k)
                 if (chipRect (cols, row, k).contains (e.position))
                     tip = "c:lib.slot:" + juce::String (k + 1);
+            if (playRect (row).contains (e.getPosition()))
+                tip = "t:Listen\nPlays the song through B, without a slot. Press again to pause. Click the waveform of the player to move in the song.";
             if (delRect (cols, row).contains (e.getPosition()))
             {
                 tip = "c:lib.del";
@@ -155,9 +197,11 @@ public:
         }
         setTip (*this, tip);
         setMouseCursor (tip.isNotEmpty() ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
-        if (del != hoverDel)
+        const int play = row >= 0 && row < (int) owner.list.size() && playRect (row).contains (e.getPosition()) ? row : -1;
+        if (del != hoverDel || play != hoverPlay)
         {
             hoverDel = del;
+            hoverPlay = play;
             repaint();
         }
     }
@@ -169,6 +213,15 @@ public:
         if (row < 0 || row >= (int) owner.list.size())
             return;
         selected = row;
+        if (playRect (row).contains (e.getPosition()))
+        {
+            const auto f = owner.list[(size_t) row].file;
+            const int st = playState (f);
+            if (st == 1 || st == 2)
+                owner.ctx.monitoring.refPlaying = st == 1;
+            else if (st == 0)
+                owner.ctx.refs.preview (f);
+        }
         for (int k = 0; k < 6; ++k)
             if (chipRect (cols, row, k).contains (e.position))
                 owner.toggleSlot (row, k);
@@ -179,12 +232,12 @@ public:
 
     void mouseExit (const juce::MouseEvent&) override
     {
-        hoverDel = -1;
+        hoverDel = hoverPlay = -1;
         repaint();
     }
 
     ReferencesView& owner;
-    int selected = -1, hoverDel = -1;
+    int selected = -1, hoverDel = -1, hoverPlay = -1;
 };
 
 // ==================================================================================================
@@ -363,7 +416,7 @@ void ReferencesView::visibilityChanged()
     {
         rescan();
         slots->refresh();
-        startTimerHz (2);
+        startTimerHz (5);
     }
     else
         stopTimer();
@@ -377,7 +430,7 @@ void ReferencesView::changeListenerCallback (juce::ChangeBroadcaster*)
 
 void ReferencesView::timerCallback()
 {
-    if (++scanCounter % 6 == 0)
+    if (++scanCounter % 15 == 0)
         rescan();
     bool changed = false;
     for (auto& it : list)
@@ -648,7 +701,7 @@ void ReferencesView::paint (juce::Graphics& g)
     const int y = tv.getY() - 30;
     g.setColour (col::text3);
     g.setFont (font (12.5f));
-    g.drawText ("Name", tv.getX() + 4, y, 200, 30, juce::Justification::centredLeft);
+    g.drawText ("Name", tv.getX() + 38, y, 200, 30, juce::Justification::centredLeft);
     if (! compact)
         g.drawText ("Length", tv.getX() + cols.length, y, 54, 30, juce::Justification::centredRight);
     g.drawText ("LUFS-I", tv.getX() + cols.lufs, y, 56, 30, juce::Justification::centredRight);

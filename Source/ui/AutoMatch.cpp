@@ -132,6 +132,7 @@ void AutoMatchStrip::start()
     phase = Phase::input;
     steps[stepInput] = StepState::running;
     startedAt = juce::Time::getMillisecondCounterHiRes();
+    shownProgress = 0.0;
     status = "Measuring the input level";
     restartMeasurement();
     resized();
@@ -548,14 +549,38 @@ void AutoMatchStrip::finish()
         if (steps[(size_t) (stepBand0 + b)] == StepState::failed)
             msg << " " << bandNames[b] << " cannot reach the target.";
     phase = Phase::done;
+    shownProgress = 1.0;
     status = msg;
     resized();
+}
+
+double AutoMatchStrip::progress()
+{
+    if (phase == Phase::idle)
+        return 0.0;
+    if (phase == Phase::done)
+        return shownProgress;
+    int finished = 0;
+    for (const auto s : steps)
+        if (s == StepState::ok || s == StepState::failed)
+            ++finished;
+    const double partial = std::clamp (waited / measureSeconds, 0.0, 1.0);
+    const double p = std::clamp ((finished + 0.9 * partial) / numSteps, 0.0, 0.99);
+    shownProgress = std::max (shownProgress, p);
+    return shownProgress;
 }
 
 // ---- drawing -------------------------------------------------------------------------------------------
 void AutoMatchStrip::resized()
 {
     auto r = getLocalBounds().reduced (10, 5);
+    barArea = {};
+    if (phase != Phase::idle)
+    {
+        // progress bar along the bottom of the strip (D-036)
+        barArea = r.removeFromBottom (4).translated (0, 2);
+        r.removeFromBottom (2);
+    }
     const bool running = phase != Phase::idle && phase != Phase::done;
     stopBtn.setVisible (running);
     go.setVisible (! running && phase != Phase::done);
@@ -623,6 +648,16 @@ void AutoMatchStrip::paint (juce::Graphics& g)
         g.setFont (font (12.0f));
         g.drawText (info, r.removeFromRight (iw), juce::Justification::centredRight);
     }
+    if (! barArea.isEmpty())
+    {
+        const auto bar = barArea.toFloat();
+        g.setColour (col::sunk);
+        g.fillRoundedRectangle (bar, 2.0f);
+        const bool running = phase != Phase::idle && phase != Phase::done;
+        const double p = progress();
+        g.setColour (running ? col::blue : (p >= 1.0 ? col::ok : col::text3));
+        g.fillRoundedRectangle (bar.withWidth (std::max (4.0f, bar.getWidth() * (float) p)), 2.0f);
+    }
     // experimental badge
     g.setColour (col::yellow);
     g.fillRoundedRectangle (badgeArea.toFloat(), 3.0f);
@@ -660,6 +695,8 @@ void AutoMatchStrip::paint (juce::Graphics& g)
         juce::String text = status;
         if (phase != Phase::idle && phase != Phase::done && noSignalFor > 1.5)
             text = tr ("Waiting for audio. Start playback.");
+        if (phase != Phase::idle && phase != Phase::done)
+            text = juce::String (juce::roundToInt (100.0 * progress())) + "%  " + text;
         g.setColour (col::text2);
         g.setFont (font (12.5f));
         g.drawText (text, statusArea, juce::Justification::centredLeft, true);

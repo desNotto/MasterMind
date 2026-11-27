@@ -83,20 +83,6 @@ public:
             ctx.proc.resetOnPlay = resetOnPlay.getToggleState();
             ctx.settings.set ("resetOnPlay", resetOnPlay.getToggleState());
         };
-        // reference player (shown while B is active)
-        for (auto* b : { &play, &restart })
-            addChildComponent (*b);
-        addChildComponent (position);
-        position.setSliderStyle (juce::Slider::LinearHorizontal);
-        position.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-        position.setRange (0.0, 1.0);
-        position.setColour (juce::Slider::trackColourId, col::magenta);
-        position.onDragEnd = [this] { ctx.monitoring.seekRequest = position.getValue() * ctx.monitoring.refLengthSeconds.load(); };
-        setTip (position, "t:Reference position\nDrag to seek in the reference. Right-click a reference button for loop and loudness matching.");
-        play.onClick = [this] { ctx.monitoring.refPlaying = ! ctx.monitoring.refPlaying.load(); };
-        restart.onClick = [this] { ctx.monitoring.seekRequest = 0.0; ctx.monitoring.refPlaying = true; };
-        setTip (play, "t:Play / pause the reference");
-        setTip (restart, "t:Play the reference from the start");
         startTimerHz (10);
     }
 
@@ -130,24 +116,10 @@ public:
             }
             x += w;
         }
-        if (! ctx.monitoring.referenceActive.load())
-        {
-            g.setColour (col::text2);
-            g.setFont (font (13.0f));
-            resetOnPlay.setButtonText (tr ("Reset on play"));
-            g.drawText (tr ("Analyse"), analyse.getBounds().translated (-62, 0).withWidth (58), juce::Justification::centredRight);
-        }
-        else
-        {
-            const auto* ref = ctx.monitoring.currentReferenceForUi();
-            g.setColour (col::magenta);
-            g.setFont (font (12.5f, true));
-            const double len = ctx.monitoring.refLengthSeconds.load(), pos = ctx.monitoring.refPositionSeconds.load();
-            const auto tm = [] (double s) { return juce::String ((int) s / 60) + ":" + juce::String ((int) s % 60).paddedLeft ('0', 2); };
-            g.drawText ("B: " + (ref != nullptr ? ref->name : juce::String ("loading...")) + "  " + tm (pos) + " / " + tm (len) + "  match "
-                            + fmtSigned (ctx.monitoring.appliedRefGainDb.load()) + " dB",
-                        playInfo, juce::Justification::centredRight, true);
-        }
+        g.setColour (col::text2);
+        g.setFont (font (13.0f));
+        resetOnPlay.setButtonText (tr ("Reset on play"));
+        g.drawText (tr ("Analyse"), analyse.getBounds().translated (-62, 0).withWidth (58), juce::Justification::centredRight);
     }
 
     void resized() override
@@ -158,14 +130,6 @@ public:
         reset.setBounds (r.removeFromRight (56));
         r.removeFromRight (6);
         analyse.setBounds (r.removeFromRight (130));
-        auto pr = getLocalBounds().reduced (8, 3);
-        restart.setBounds (pr.removeFromRight (30));
-        pr.removeFromRight (4);
-        play.setBounds (pr.removeFromRight (30));
-        pr.removeFromRight (8);
-        position.setBounds (pr.removeFromRight (std::min (240, pr.getWidth() / 3)));
-        pr.removeFromRight (8);
-        playInfo = pr.removeFromRight (std::min (360, pr.getWidth() / 2));
     }
 
     void mouseUp (const juce::MouseEvent& e) override
@@ -204,18 +168,6 @@ public:
 
     void timerCallback() override
     {
-        const bool refOn = ctx.monitoring.referenceActive.load();
-        analyse.setVisible (! refOn);
-        reset.setVisible (! refOn);
-        resetOnPlay.setVisible (! refOn);
-        play.setVisible (refOn);
-        restart.setVisible (refOn);
-        position.setVisible (refOn);
-        play.setButtonText (ctx.monitoring.refPlaying.load() ? juce::String (juce::CharPointer_UTF8 ("\xe2\x9d\x9a\xe2\x9d\x9a")) : juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xb6")));
-        restart.setButtonText (juce::String (juce::CharPointer_UTF8 ("\xe2\x8f\xae")));
-        const double len = ctx.monitoring.refLengthSeconds.load();
-        if (refOn && len > 0 && ! position.isMouseButtonDown())
-            position.setValue (ctx.monitoring.refPositionSeconds.load() / len, juce::dontSendNotification);
         analyse.setSelected (ctx.tap, false);
         repaint();
     }
@@ -227,9 +179,6 @@ public:
     Segmented analyse { { "In", "Out", "Both" } };
     Btn reset { "Reset" };
     juce::ToggleButton resetOnPlay;
-    Btn play { "Play" }, restart { "|<" };
-    juce::Slider position;
-    juce::Rectangle<int> playInfo;
 };
 
 // ---- Footer ---------------------------------------------------------------------------------------------
@@ -347,8 +296,10 @@ MasterMindEditor::MasterMindEditor (MasterMindProcessor& p) : AudioProcessorEdit
     spectrogram = std::make_unique<SpectrogramView> (ctx);
     albumView = std::make_unique<AlbumView> (ctx);
     refsView = std::make_unique<ReferencesView> (ctx);
+    player = std::make_unique<RefPlayer> (ctx);
     for (juce::Component* c : std::initializer_list<juce::Component*> { topBar.get(), tabBar.get(), footer.get(), spectrumCompact.get(), master.get(),
-                                                                         eyes.get(), checksCompact.get(), lowEnd.get(), stereo.get(), spectrogram.get(), albumView.get(), refsView.get() })
+                                                                         eyes.get(), checksCompact.get(), lowEnd.get(), stereo.get(), spectrogram.get(), albumView.get(), refsView.get(),
+                                                                         player.get() })
         root->addChildComponent (c);
     root->addChildComponent (bubble);
     bubble.setInterceptsMouseClicks (false, false);
@@ -410,12 +361,27 @@ void MasterMindEditor::paint (juce::Graphics& g) { g.fillAll (col::bg); }
 
 void MasterMindEditor::paintOverChildren (juce::Graphics& g)
 {
-    // red frame while monitoring is active (spec 6.0 rule 3)
-    if (processorRef.monitorActive.load())
+    // Bypass greys out the plugin below the top bar; the controls stay usable (D-036). The red
+    // monitoring frame and the MONITOR ON badge were removed at the user's request.
+    if (ctx.monitoring.chainBypass.load() && ! ctx.monitoring.referenceActive.load())
     {
-        g.setColour (col::mon);
-        g.drawRect (getLocalBounds(), 2);
-        g.fillRect (0, 0, getWidth(), 3);
+        const float sc = layoutScale (getWidth(), getHeight());
+        const int top = juce::roundToInt ((float) topBar->getBottom() * sc);
+        const auto area = getLocalBounds().withTrimmedTop (top);
+        g.setColour (juce::Colour (0xff3a3d44).withAlpha (0.62f));
+        g.fillRect (area);
+        // label in the middle of the footer, where it covers no control
+        const auto f = font (12.5f * sc, true);
+        const juce::String label = root->getWidth() >= 900 ? tr ("BYPASS: you hear the input") : juce::String ("BYPASS");
+        const int w = juce::roundToInt (juce::GlyphArrangement::getStringWidth (f, label) + 28.0f * sc);
+        const auto fb = footer->getBounds().toFloat() * sc;
+        const auto pill = juce::Rectangle<int> (w, juce::roundToInt (fb.getHeight() - 4.0f * sc)).withCentre (fb.getCentre().roundToInt());
+        g.setColour (juce::Colour (0xff23262c));
+        g.fillRoundedRectangle (pill.toFloat(), pill.getHeight() * 0.5f);
+        g.setColour (juce::Colour (0xffb9bec8));
+        g.drawRoundedRectangle (pill.toFloat().reduced (0.5f), pill.getHeight() * 0.5f, 1.0f);
+        g.setFont (f);
+        g.drawText (label, pill, juce::Justification::centred);
     }
     if (toast.isNotEmpty() && juce::Time::getMillisecondCounterHiRes() < toastUntil)
     {
@@ -469,6 +435,16 @@ void MasterMindEditor::layoutContent()
     auto r = root->getLocalBounds().withTrimmedTop (tabBar->getBottom()).withTrimmedBottom (compact ? 20 : 24).reduced (compact ? 6 : 8);
     const int gap = compact ? 6 : 8;
     const auto t = currentTab;
+
+    // reference player while B plays (D-036)
+    lastPlayer = ctx.monitoring.referenceActive.load();
+    player->setVisible (lastPlayer);
+    if (lastPlayer)
+    {
+        player->setCompact (compact);
+        player->setBounds (r.removeFromTop (compact ? RefPlayer::heightCompact : RefPlayer::heightFull));
+        r.removeFromTop (gap);
+    }
 
     if (t == "Master")
     {
@@ -595,11 +571,16 @@ void MasterMindEditor::timerCallback()
     }());
     ctx.monitoring.collectGarbage();
 
-    const bool monitor = processorRef.monitorActive.load();
-    if (monitor != lastMonitor)
+    if (ctx.monitoring.referenceActive.load() != lastPlayer)
     {
-        lastMonitor = monitor;
-        topBar->resized();
+        layoutContent();
+        repaint();
+    }
+    if (player->isVisible())
+        player->update();
+    if (const bool byp = ctx.monitoring.chainBypass.load(); byp != lastBypass)
+    {
+        lastBypass = byp;
         repaint();
     }
     ++frame;

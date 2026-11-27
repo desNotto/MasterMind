@@ -7,6 +7,7 @@
 #include "ui/EyesView.h"
 #include "ui/MasterView.h"
 #include "ui/OtherViews.h"
+#include "ui/RefPlayer.h"
 #include "ui/ReferencesView.h"
 #include "ui/SpectrumPanel.h"
 #include "ui/TopBar.h"
@@ -78,6 +79,7 @@ private:
     std::unique_ptr<mm::ui::SpectrogramView> spectrogram;
     std::unique_ptr<mm::ui::AlbumView> albumView;
     std::unique_ptr<mm::ui::ReferencesView> refsView;
+    std::unique_ptr<mm::ui::RefPlayer> player;
     mm::ui::TipBubble bubble;
     juce::String currentTab = "Master";
     mm::ui::LayoutMode mode = mm::ui::LayoutMode::full;
@@ -88,7 +90,7 @@ private:
     bool tipShown = false;
     juce::String toast;
     double toastUntil = 0.0;
-    bool lastMonitor = false;
+    bool lastPlayer = false, lastBypass = false;
     uint64_t lastSerial = 0;
     int frame = 0;
 

@@ -286,6 +286,65 @@ int main (int argc, char** argv)
         juce::PNGImageFormat().writeImageToStream (image, os);
         std::printf ("%s: %s\n", label.toRawUTF8(), file.getFullPathName().toRawUTF8());
     }
+    // reference player with the waveform overview, and the grey Bypass (D-036)
+    {
+        auto ref = std::make_unique<mm::monitoring::ReferenceAudio>();
+        const int n = 48000 * 40;
+        ref->audio.setSize (2, n);
+        juce::Random rnd (5);
+        for (int i = 0; i < n; ++i)
+        {
+            const double t = i / 48000.0;
+            const double env = (t < 4.0 ? 0.3 : (t < 18.0 ? 0.7 : (t < 22.0 ? 0.25 : 0.85))) * (0.75 + 0.25 * std::sin (t * 1.7));
+            const float v = (float) (env * (rnd.nextFloat() * 2.0f - 1.0f) * (std::fmod (t, 0.5) < 0.06 ? 1.0 : 0.6));
+            ref->audio.setSample (0, i, v);
+            ref->audio.setSample (1, i, v * 0.95f);
+        }
+        ref->name = "Reference song";
+        ref->file = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("Reference song.wav");
+        ref->slot = 0;
+        ref->computeOverview();
+        auto& mon = proc.getMonitoring();
+        mon.setReference (std::move (ref));
+        mon.referenceActive = true;
+        mon.refPlaying = true;
+        mon.seekRequest = 13.0;
+        struct State
+        {
+            int w, h;
+            const char* tab;
+            bool bypass;
+        };
+        for (const auto& s : { State { 1280, 800, "Master", false }, State { 1536, 960, "Eyes", false }, State { 640, 400, "Overview", false },
+                               State { 1280, 800, "References", false }, State { 1280, 800, "Master", true }, State { 640, 400, "Master", true } })
+        {
+            mon.referenceActive = ! s.bypass;
+            mon.chainBypass = s.bypass;
+            feedAudio (proc, 0.5);
+            editor->setSize (s.w, s.h);
+            editor->showTab (s.tab);
+            editor->selectModule (8);
+            for (int i = 0; i < 6; ++i)
+            {
+                juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
+                editor->forceUpdate();
+            }
+            const juce::String label = juce::String (s.w) + "x" + juce::String (s.h) + " " + s.tab + (s.bypass ? " bypass" : " player");
+            failures += checkLayout (editor->getRoot(), label);
+            auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+            const auto file = outDir.getChildFile (juce::String (s.w) + "x" + juce::String (s.h) + "-" + juce::String (s.tab).toLowerCase() + (s.bypass ? "-bypass" : "-player") + ".png");
+            file.deleteFile();
+            juce::FileOutputStream os (file);
+            juce::PNGImageFormat().writeImageToStream (image, os);
+            std::printf ("%s: %s\n", label.toRawUTF8(), file.getFullPathName().toRawUTF8());
+        }
+        mon.referenceActive = false;
+        mon.refPlaying = false;
+        mon.chainBypass = false;
+        mon.setReference (nullptr);
+        feedAudio (proc, 0.1);
+    }
+
     // Russian interface strings
     mm::ui::setLanguage (mm::ui::Language::russian);
     for (const char* tab : { "Eyes", "Spectrogram", "Master" })

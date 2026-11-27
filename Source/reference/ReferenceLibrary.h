@@ -66,6 +66,11 @@ public:
     /** Selects the slot for playback (decodes in the background). -1 = none. */
     void select (int index);
     int selected() const { return selectedSlot; }
+
+    /** Plays a library song (References tab) through B without assigning it to a slot. Decodes in
+        the background, then switches B on and starts playback. Selecting a slot ends the preview. */
+    void preview (const juce::File& file);
+    juce::File previewing() const { return previewFile; }
     bool isLoadingPlayback() const { return playbackLoading; }
 
     ReferenceTarget target() const { return currentTarget; }
@@ -91,6 +96,7 @@ private:
     juce::ThreadPool pool { 2 };
     int selectedSlot = -1;
     bool playbackLoading = false;
+    juce::File previewFile;
     ReferenceTarget currentTarget;
     std::shared_ptr<bool> alive = std::make_shared<bool> (true);
     std::atomic<bool> cancelAll { false };

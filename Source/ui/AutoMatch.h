@@ -60,6 +60,8 @@ private:
     std::array<double, 6> deviations() const;
     void enterTonal (const juce::String& why);
     void finish();
+    /** Overall progress 0..1: finished steps plus the running measurement (never goes back). */
+    double progress();
 
     Context& ctx;
     Btn go { "Auto match" }, undoBtn { "Undo" }, stopBtn { "Stop" };
@@ -69,7 +71,8 @@ private:
     bool dynamicsDone = false, widthDone = false, loudnessDone = false;
     std::array<int, 6> bandAttempts {};
     std::array<double, 5> mbTargetGr {};
-    double waited = 0.0, noSignalFor = 0.0, startedAt = 0.0;
+    double waited = 0.0, noSignalFor = 0.0, startedAt = 0.0, shownProgress = 0.0;
+    juce::Rectangle<int> barArea;
 
     // meters sampled while a measurement runs (averages and maxima)
     struct Meters

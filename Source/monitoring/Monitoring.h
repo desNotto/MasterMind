@@ -20,7 +20,12 @@ struct ReferenceAudio
     std::vector<float> shortTerm; // LUFS every 100 ms
     double integrated = -100.0;
     juce::String name;
-    int slot = -1;
+    juce::File file;
+    int slot = -1; // -1: library preview (References tab)
+    /** Waveform overview for the player: peak and RMS of both channels in waveBins equal bins. */
+    static constexpr int waveBins = 1200;
+    std::vector<float> wavePeak, waveRms;
+    void computeOverview();
 };
 
 /** Lock-free hand-over of an object from the message thread to the audio thread: the writer
@@ -173,6 +178,7 @@ private:
     int bandForFilters = -2;
     double matchGain = 1.0, refGain = 1.0, smoothCoeff = 0.0;
     double refPos = 0.0;
+    const ReferenceAudio* lastRef = nullptr;
     juce::AudioBuffer<float> scratch;
 };
 } // namespace mm::monitoring
