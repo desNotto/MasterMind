@@ -275,7 +275,7 @@ LoudnessPanel::LoudnessPanel (Context& c) : ctx (c)
         juce::PopupMenu m;
         auto t = ctx.engine.getTargets();
         m.addItem (1, "Streaming reference (-14 LUFS, -1 dBTP)", true, std::abs (t.integratedLufs + 14.0) < 0.01);
-        for (int v : { -12, -10, -9, -8, -7 })
+        for (int v : { -12, -10, -9, -8, -7, -6, -5 })
             m.addItem (100 - v, "Custom " + fmtMinus (v, 0) + " LUFS", true, std::abs (t.integratedLufs - v) < 0.01);
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target), [this] (int r)
         {
