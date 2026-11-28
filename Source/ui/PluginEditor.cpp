@@ -202,6 +202,12 @@ public:
         quality.addItem (3, "High (4x)", true, q == 2);
         m.addSubMenu ("Quality", quality);
         m.addItem (10, "Reset analysis on transport start", true, ctx.proc.resetOnPlay.load());
+        // moved here from the right click of the buttons 1-6 (D-041)
+        juce::PopupMenu refMatch;
+        refMatch.addItem (40, "Auto: current section (short-term)", true, ctx.monitoring.refMatchMode == 0);
+        refMatch.addItem (41, "Auto: whole track (integrated)", true, ctx.monitoring.refMatchMode == 1);
+        refMatch.addItem (42, "Manual (0 dB)", true, ctx.monitoring.refMatchMode == 2);
+        m.addSubMenu ("Reference loudness matching", refMatch);
         juce::PopupMenu lang;
         lang.addItem (30, "English", true, language() == Language::english);
         lang.addItem (31, juce::String (juce::CharPointer_UTF8 ("\xd0\xa0\xd1\x83\xd1\x81\xd1\x81\xd0\xba\xd0\xb8\xd0\xb9")), true, language() == Language::russian);
@@ -213,6 +219,11 @@ public:
         {
             if (r >= 1 && r <= 3)
                 ctx.setParam ("quality", (float) (r - 1));
+            else if (r >= 40 && r <= 42)
+            {
+                ctx.monitoring.refMatchMode = r - 40;
+                ctx.proc.syncExtraState();
+            }
             else if (r == 10)
             {
                 ctx.proc.resetOnPlay = ! ctx.proc.resetOnPlay.load();
@@ -446,7 +457,7 @@ void MasterMindEditor::paintOverChildren (juce::Graphics& g)
 {
     // Bypass greys out the plugin below the top bar; the controls stay usable (D-036). The red
     // monitoring frame and the MONITOR ON badge were removed at the user's request.
-    if (ctx.monitoring.chainBypass.load() && ! ctx.monitoring.referenceActive.load())
+    if (ctx.monitoring.chainBypass.load() && ! (ctx.monitoring.referenceActive.load() && ctx.monitoring.refPlaying.load()))
     {
         const float sc = layoutScale (getWidth(), getHeight());
         const int top = juce::roundToInt ((float) topBar->getBottom() * sc);
@@ -642,7 +653,8 @@ void MasterMindEditor::timerCallback()
     }
     if (player->isVisible())
         player->update();
-    if (const bool byp = ctx.monitoring.chainBypass.load(); byp != lastBypass)
+    // grey while the bypassed project is heard (a paused reference lets the project play)
+    if (const bool byp = ctx.monitoring.chainBypass.load() && ! (ctx.monitoring.referenceActive.load() && ctx.monitoring.refPlaying.load()); byp != lastBypass)
     {
         lastBypass = byp;
         repaint();

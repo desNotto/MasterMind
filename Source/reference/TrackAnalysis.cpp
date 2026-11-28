@@ -160,7 +160,8 @@ std::optional<TrackAnalysis> TrackAnalysis::fromJson (const juce::var& v)
 }
 
 std::optional<TrackAnalysis> analyseFile (const juce::File& file, std::function<void (float)> progress,
-                                          const std::atomic<bool>& cancelled, juce::String& error)
+                                          const std::atomic<bool>& cancelled, juce::String& error,
+                                          double fromSeconds, double toSeconds)
 {
     std::unique_ptr<juce::AudioFormatReader> reader (formatManager().createReaderFor (file));
     if (reader == nullptr)
@@ -179,9 +180,14 @@ std::optional<TrackAnalysis> analyseFile (const juce::File& file, std::function<
     a.prepare (reader->sampleRate, 13);
     const int chunk = 32768;
     juce::AudioBuffer<float> buf (2, chunk);
-    const auto total = reader->lengthInSamples;
+    juce::int64 first = 0, total = reader->lengthInSamples;
+    if (toSeconds > fromSeconds)
+    {
+        first = std::clamp ((juce::int64) (fromSeconds * reader->sampleRate), (juce::int64) 0, total);
+        total = std::clamp ((juce::int64) (toSeconds * reader->sampleRate), first, total);
+    }
     std::vector<float> shortTerm;
-    for (juce::int64 pos = 0; pos < total; pos += chunk)
+    for (juce::int64 pos = first; pos < total; pos += chunk)
     {
         if (cancelled.load())
         {
@@ -195,9 +201,9 @@ std::optional<TrackAnalysis> analyseFile (const juce::File& file, std::function<
             buf.copyFrom (1, 0, buf, 0, 0, n);
         a.process (buf.getReadPointer (0), buf.getReadPointer (1), n);
         if (progress)
-            progress ((float) ((double) (pos + n) / (double) total));
+            progress ((float) ((double) (pos + n - first) / (double) std::max<juce::int64> (1, total - first)));
     }
-    auto t = fromAnalyzer (a, (double) total / reader->sampleRate);
+    auto t = fromAnalyzer (a, (double) (total - first) / reader->sampleRate);
     const auto& hist = a.loudness().shortTermFullHistory();
     t.shortTerm.assign (hist.begin(), hist.end());
     t.name = file.getFileNameWithoutExtension();

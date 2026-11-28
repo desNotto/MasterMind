@@ -289,3 +289,22 @@ The user asked for a batch of changes and approved mockup v18 with "давай �
 - The search runs the user's limiter setting: with the classic limiter in the search and the band limiter in the final check the results got worse (the two limiters shape the tone differently).
 - Measured on the build machine (8 threads, 8.5 s excerpt, synthetic mix vs reference, distance 557 at neutral): Fast 10 s to 8.9, Hybrid 46 s to 7.7, Precise 81 s to 8.7. On a 4-core computer Precise takes about 4 minutes.
 - The mode is a global setting (`automatch_mode` in settings.json), not a parameter.
+
+## D-041 Gentle low end in Auto match; buttons 1-6 switch only; pause plays the project; metrics region (2026-11-28)
+
+**The user's report**: every Auto match mode made the low end boomy and bubbly although the numbers matched the reference; the plugin simply raised the low EQ bands to reach the Sub and Bass shares. I named three causes (the reference measured over the whole song while our mix is measured over its loudest 8 s; a static low boost lifts sustained bass notes and resonances, not only the kick; more low energy makes the limiter pump with the bass) and seven remedies. The user chose remedies 3 to 7 and, for the comparison of like with like, a manual metrics region on the References tab instead of remedy 1.
+
+**Auto match, as built** (`automatch/MatchEngine.*`):
+- (3) Sub and Bass EQ boosts are capped at +3 dB, Low-mid at +2 dB (mud), the other bands at +-4 dB, Sub and Bass cuts at -6 dB. A boost of Sub or Bass costs (gain / 2 dB)^2 in the distance, a Low-mid boost 0.5 (gain / 1.5 dB)^2.
+- (4) EQ bands 1 and 2 are dynamic (compress mode, range 3 dB, attack 15 ms, release 120 ms); after the neutral pass their threshold is set 1 dB above the average detector level of the band, so a boost backs off on loud low passages (long notes) and a kick keeps its weight.
+- (5) Two new search knobs: Low-End Translator amount (0-60 %, mix 50 %) and the low band drive of Saturation (0-8 dB, neutral 2 dB). The formula gives what the capped boost cannot: Translator 12 % per missing dB (at most 50 %), low drive 2 dB plus the missing dB.
+- (6) Two new terms in the distance: boom (Sub or Bass crest factor more than 0.5 dB below the reference, squared) and pumping (standard deviation of the limiter gain reduction in 10 ms means above 1 dB, weight 0.8 per (0.5 dB)^2).
+- (7) The fixed setup: subsonic filter 30 Hz 24 dB/oct, mono below 120 Hz at 100 %.
+- A test showed that capping the low boost alone made the formula push the other bands to the limits: the tonal balance is a share of the total, so one band that misses energy makes all others look too loud. The tonal deviations are now median-centred before the EQ formula, the corrections and the distance, so the missing band stays the only one to correct.
+- Tests: a thin mix against a reference with far more low end keeps Sub and Bass at +3 dB or less, uses the Translator, has the dynamic bands with a measured threshold, the 30 Hz filter and mono maker, and still gets closer to the reference.
+
+**Buttons 1-6** (mockup v19): they only switch between loaded references. Empty, analysing or failed slots are dimmed and inactive; the right click does nothing (the slot menu is gone; the reference loudness matching mode moved to the options menu at the bottom right); audio files dropped on the top bar are ignored (presets still import). When a reference is in the player, a click moves the player to the new song and keeps its play or pause state (default of section 12: "switch" applied to the player too); otherwise nothing starts.
+
+**Pause**: a paused reference now lets the project play (the monitoring section uses the reference only while it plays); the player stays open and keeps its position, seeking works while paused, and the window greys for Bypass again while paused.
+
+**Metrics region**: the backend is in (`ReferenceLibrary::setRegion`, `Slot::metrics()`, `analyseFile` with a time range, cached per region, saved in the project). The target, the checks and Auto match use the region analysis of a slot when one exists, including the reference loudness. Test: a 60 Hz tone followed by noise gives a Sub share of -2.3 dB for the whole file and -26 dB for a region in the noise. The selection on the player waveform (mockup v19) waits for the user's approval.

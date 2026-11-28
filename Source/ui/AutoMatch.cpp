@@ -102,8 +102,8 @@ double AutoMatchStrip::referenceLufs() const
     if (t.isEmpty())
         return ctx.refs.target().integrated;
     const int s = t.upToFirstOccurrenceOf ("|", false, false).getIntValue() - 1;
-    const auto& a = ctx.refs.slot (s).analysis;
-    return a.has_value() ? a->integrated : ctx.refs.target().integrated;
+    const auto* m = ctx.refs.slot (s).metrics(); // the metrics region when one is set (D-041)
+    return m != nullptr ? m->integrated : ctx.refs.target().integrated;
 }
 
 automatch::Target AutoMatchStrip::buildTarget() const

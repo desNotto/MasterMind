@@ -39,10 +39,12 @@ TrackAnalysis fromAnalyzer (const analysis::TapAnalyzer& a, double durationSecon
 /** Normalised band-power spectrum at spectrumFreqs() from an analyzer (for live comparisons). */
 std::vector<float> normalisedSpectrum (const analysis::TapAnalyzer& a);
 
-/** Decodes and analyses a whole audio file (WAV, FLAC, MP3, OGG). Runs on a worker thread.
-    `progress` gets 0..1; `cancelled` is polled. Returns nullopt with `error` set on failure. */
+/** Decodes and analyses an audio file (WAV, FLAC, MP3, OGG). Runs on a worker thread.
+    `progress` gets 0..1; `cancelled` is polled. Returns nullopt with `error` set on failure.
+    With toSeconds > fromSeconds only that part of the song is analysed (the metrics region, D-041). */
 std::optional<TrackAnalysis> analyseFile (const juce::File& file, std::function<void (float)> progress,
-                                          const std::atomic<bool>& cancelled, juce::String& error);
+                                          const std::atomic<bool>& cancelled, juce::String& error,
+                                          double fromSeconds = 0.0, double toSeconds = -1.0);
 
 /** Decodes a file into memory at the target sample rate (for reference playback). */
 bool decodeForPlayback (const juce::File& file, double targetRate, juce::AudioBuffer<float>& out, juce::String& error,

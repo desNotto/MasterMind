@@ -136,6 +136,70 @@ private:
     std::shared_ptr<bool> alive;
 };
 
+/** Analysis of the metrics region of a song (D-041). Cached like the whole-song analysis, keyed by
+    the region too. */
+class ReferenceLibrary::RegionJob final : public juce::ThreadPoolJob
+{
+public:
+    RegionJob (ReferenceLibrary& o, juce::File f, Region r)
+        : juce::ThreadPoolJob ("Analyse reference region"), owner (o), file (std::move (f)), region (r), alive (o.alive)
+    {
+    }
+
+    JobStatus runJob() override
+    {
+        juce::String error;
+        std::optional<TrackAnalysis> result;
+        const auto base = owner.cacheFileFor (file);
+        const auto cacheFile = base.getSiblingFile (base.getFileNameWithoutExtension() + "-r" + juce::String (juce::roundToInt (region.start * 10.0)) + "-"
+                                                    + juce::String (juce::roundToInt (region.end * 10.0)) + ".json");
+        if (cacheFile.existsAsFile())
+        {
+            juce::var v;
+            if (juce::JSON::parse (cacheFile.loadFileAsString(), v).wasOk())
+                result = TrackAnalysis::fromJson (v);
+        }
+        if (! result)
+        {
+            result = analyseFile (file, {}, owner.cancelAll, error, region.start, region.end);
+            if (result)
+            {
+                cacheFile.getParentDirectory().createDirectory();
+                juce::TemporaryFile tmp (cacheFile);
+                if (tmp.getFile().replaceWithText (juce::JSON::toString (result->toJson(), true)))
+                    tmp.overwriteTargetFileWithTemporary();
+            }
+        }
+        juce::MessageManager::callAsync ([w = std::weak_ptr<bool> (alive), o = &owner, f = file, r = region, result]
+        {
+            if (w.expired())
+                return;
+            const auto key = f.getFullPathName();
+            if (auto it = o->regionJobs.find (key); it != o->regionJobs.end() && --it->second <= 0)
+                o->regionJobs.erase (it);
+            const auto now = o->region (f);
+            if (std::abs (now.start - r.start) > 1.0e-6 || std::abs (now.end - r.end) > 1.0e-6)
+                return; // the region changed meanwhile; its own job delivers
+            for (auto& s : o->slots)
+                if (s.file == f && s.state == State::ready)
+                {
+                    s.regionAnalysis = result;
+                    if (s.regionAnalysis && s.analysis)
+                        s.regionAnalysis->name = s.analysis->name;
+                }
+            o->recomputeTarget();
+            o->sendChangeMessage();
+        });
+        return jobHasFinished;
+    }
+
+private:
+    ReferenceLibrary& owner;
+    juce::File file;
+    Region region;
+    std::shared_ptr<bool> alive;
+};
+
 class ReferenceLibrary::DecodeJob final : public juce::ThreadPoolJob
 {
 public:
@@ -238,6 +302,7 @@ void ReferenceLibrary::finished (int index, const juce::File& file, std::optiona
     {
         result->name = file.getFileNameWithoutExtension();
         s.analysis = result;
+        s.regionAnalysis.reset();
         s.state = State::ready;
         s.progress = 1.0f;
     }
@@ -247,6 +312,8 @@ void ReferenceLibrary::finished (int index, const juce::File& file, std::optiona
         s.error = error;
     }
     recomputeTarget();
+    if (result)
+        startRegionJobs (file);
     if (selectedSlot == index && previewFile == juce::File())
         select (index);
     sendChangeMessage();
@@ -311,9 +378,47 @@ void ReferenceLibrary::recomputeTarget()
 {
     std::vector<const TrackAnalysis*> set;
     for (const auto& s : slots)
-        if (s.state == State::ready && s.inSet && s.analysis)
-            set.push_back (&*s.analysis);
+        if (s.state == State::ready && s.inSet && s.metrics() != nullptr)
+            set.push_back (s.metrics());
     currentTarget = buildTarget (set);
+}
+
+ReferenceLibrary::Region ReferenceLibrary::region (const juce::File& file) const
+{
+    const auto it = regions.find (file.getFullPathName());
+    return it != regions.end() ? it->second : Region {};
+}
+
+bool ReferenceLibrary::isAnalysingRegion (const juce::File& file) const { return regionJobs.count (file.getFullPathName()) > 0; }
+
+void ReferenceLibrary::setRegion (const juce::File& file, double start, double end)
+{
+    const Region r { std::min (start, end), std::max (start, end) };
+    if (r.valid())
+        regions[file.getFullPathName()] = r;
+    else
+        regions.erase (file.getFullPathName());
+    for (auto& s : slots)
+        if (s.file == file)
+            s.regionAnalysis.reset();
+    if (r.valid())
+        startRegionJobs (file);
+    recomputeTarget();
+    sendChangeMessage();
+}
+
+void ReferenceLibrary::startRegionJobs (const juce::File& file)
+{
+    const auto r = region (file);
+    if (! r.valid())
+        return;
+    bool used = false;
+    for (const auto& s : slots)
+        used = used || (s.file == file && s.state == State::ready);
+    if (! used)
+        return; // a library song without a slot: analysed when it gets one
+    ++regionJobs[file.getFullPathName()];
+    pool.addJob (new RegionJob (*this, file, r), true);
 }
 
 analysis::Targets ReferenceLibrary::checkTargets() const
@@ -342,6 +447,14 @@ juce::ValueTree ReferenceLibrary::toState() const
         s.setProperty ("inSet", slots[(size_t) i].inSet, nullptr);
         v.appendChild (s, nullptr);
     }
+    for (const auto& [path, r] : regions)
+    {
+        juce::ValueTree rv ("Region");
+        rv.setProperty ("path", path, nullptr);
+        rv.setProperty ("start", r.start, nullptr);
+        rv.setProperty ("end", r.end, nullptr);
+        v.appendChild (rv, nullptr);
+    }
     return v;
 }
 
@@ -349,8 +462,18 @@ void ReferenceLibrary::fromState (const juce::ValueTree& v)
 {
     if (! v.isValid())
         return;
+    regions.clear();
+    for (const auto& rv : v)
+        if (rv.hasType ("Region"))
+        {
+            const Region r { (double) rv.getProperty ("start", 0.0), (double) rv.getProperty ("end", 0.0) };
+            if (r.valid())
+                regions[rv.getProperty ("path", "").toString()] = r;
+        }
     for (const auto& s : v)
     {
+        if (! s.hasType ("Slot"))
+            continue;
         const int i = s.getProperty ("index", -1);
         const juce::String path = s.getProperty ("path", "");
         if (i < 0 || i >= numSlots)

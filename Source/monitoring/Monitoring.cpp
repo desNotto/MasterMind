@@ -181,7 +181,24 @@ bool Monitoring::process (juce::AudioBuffer<float>& buffer, const juce::AudioBuf
     bool changed = false;
 
     // ---- 1. Source: reference (B), loudness-matched chain bypass, delta listen ---------------------
-    const bool useRef = referenceActive.load() && ref != nullptr && ref->audio.getNumSamples() > 0;
+    // A paused reference keeps its player and position, but the project plays (mockup v19)
+    const bool refLoaded = referenceActive.load() && ref != nullptr && ref->audio.getNumSamples() > 0;
+    const bool useRef = refLoaded && refPlaying.load();
+    if (refLoaded && ! useRef)
+    {
+        const double len = ref->audio.getNumSamples();
+        refLengthSeconds.store (len / fs);
+        if (ref != lastRef)
+        {
+            lastRef = ref;
+            if (refPos >= len)
+                refPos = 0.0;
+        }
+        const double seek = seekRequest.exchange (-1.0);
+        if (seek >= 0.0)
+            refPos = std::clamp (seek * fs, 0.0, len - 1.0);
+        refPositionSeconds.store (refPos / fs);
+    }
     if (useRef)
     {
         const double len = ref->audio.getNumSamples();
@@ -218,26 +235,18 @@ bool Monitoring::process (juce::AudioBuffer<float>& buffer, const juce::AudioBuf
         targetDb = std::clamp (targetDb, -24.0, 24.0);
         const double targetGain = dsp::dbToGain (targetDb);
 
-        const bool playing = refPlaying.load();
         const float* rl = ref->audio.getReadPointer (0);
         const float* rr = ref->audio.getReadPointer (ref->audio.getNumChannels() > 1 ? 1 : 0);
         for (int i = 0; i < n; ++i)
         {
             if ((i & 63) == 0)
                 refGain = targetGain + smoothCoeff * (refGain - targetGain);
-            if (playing)
-            {
-                const int p = (int) refPos;
-                l[i] = (float) (rl[p] * refGain);
-                r[i] = (float) (rr[p] * refGain);
-                refPos += 1.0;
-                if (refPos >= loopB)
-                    refPos = loopA;
-            }
-            else
-            {
-                l[i] = r[i] = 0.0f;
-            }
+            const int p = (int) refPos;
+            l[i] = (float) (rl[p] * refGain);
+            r[i] = (float) (rr[p] * refGain);
+            refPos += 1.0;
+            if (refPos >= loopB)
+                refPos = loopA;
         }
         refPositionSeconds.store (refPos / fs);
         appliedRefGainDb.store ((float) dsp::gainToDb (refGain));

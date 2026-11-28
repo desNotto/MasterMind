@@ -2,7 +2,10 @@
 #include "analysis/TapAnalyzer.h"
 #include "automatch/MatchEngine.h"
 #include "dsp/PhaseAuto.h"
+#include "reference/TrackAnalysis.h"
 #include "state/Parameters.h"
+
+#include <juce_audio_formats/juce_audio_formats.h>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -93,13 +96,16 @@ struct Run
 {
     double startCost, endCost, lufs, targetLufs, seconds;
     int evals;
+    automatch::ParamMap result;
 };
 
-Run runMode (automatch::Mode mode, double seconds)
+Run runMode (automatch::Mode mode, double seconds, bool thinMix = false)
 {
     const double fs = 48000.0;
-    const auto mix = makeSignal (fs, seconds, 1.6f, 0.5f, 0.2f, 0.8f, 7u);   // dark, quieter, very dynamic
-    const auto ref = makeSignal (fs, seconds, 1.0f, 1.0f, 0.5f, 0.4f, 99u); // brighter, louder, denser
+    // default: a dark, quieter, very dynamic mix against a brighter, louder, denser reference;
+    // thinMix: a mix with little low end against a reference with a lot (the boomy case of D-041)
+    const auto mix = thinMix ? makeSignal (fs, seconds, 0.35f, 1.0f, 0.3f, 0.5f, 7u) : makeSignal (fs, seconds, 1.6f, 0.5f, 0.2f, 0.8f, 7u);
+    const auto ref = thinMix ? makeSignal (fs, seconds, 2.2f, 0.8f, 0.5f, 0.5f, 99u) : makeSignal (fs, seconds, 1.0f, 1.0f, 0.5f, 0.4f, 99u);
     const auto target = targetFrom (ref, fs);
     const auto current = defaults();
     analysis::TapAnalyzer in;
@@ -119,7 +125,7 @@ Run runMode (automatch::Mode mode, double seconds)
     for (const auto& d : automatch::dims())
         knobs << d.id << "=" << m.result[d.id] << " ";
     UNSCOPED_INFO ("knobs " << knobs << " neutral lufs " << m.neutralFeatures.lufs << " tp " << m.finalFeatures.truePeak);
-    return { m.startCost.load(), m.bestCost.load(), m.finalFeatures.lufs, target.lufs, sec, m.evals.load() };
+    return { m.startCost.load(), m.bestCost.load(), m.finalFeatures.lufs, target.lufs, sec, m.evals.load(), m.result };
 }
 } // namespace
 
@@ -129,6 +135,22 @@ TEST_CASE ("Auto match Fast moves the mix towards the reference", "[automatch]")
     INFO ("start " << r.startCost << " end " << r.endCost << " lufs " << r.lufs << " target " << r.targetLufs << " time " << r.seconds << " s, " << r.evals << " passes");
     CHECK (r.endCost < 0.5 * r.startCost);
     CHECK (std::abs (r.lufs - r.targetLufs) < 1.0);
+}
+
+TEST_CASE ("Auto match lifts a thin low end gently", "[automatch]")
+{
+    // the reference has far more low end: the EQ may lift Sub and Bass by 3 dB at most, the rest
+    // comes from harmonics, the low bands are dynamic and the low end is cleaned (D-041)
+    auto r = runMode (automatch::Mode::fast, 4.5, true);
+    INFO ("start " << r.startCost << " end " << r.endCost);
+    CHECK (r.result["eq_b1_gain"] <= 3.0f);
+    CHECK (r.result["eq_b2_gain"] <= 3.0f);
+    CHECK (r.result["lem_tr_amount"] > 0.0f);
+    CHECK (r.result["eq_b1_dyn"] == 1.0f);
+    CHECK (r.result["eq_b1_thr"] < 0.0f);
+    CHECK (r.result["hpf_freq"] == 30.0f);
+    CHECK (r.result["lem_mono_on"] == 1.0f);
+    CHECK (r.endCost < r.startCost);
 }
 
 TEST_CASE ("Auto match modes: time and distance", "[.bench]")
@@ -159,4 +181,39 @@ TEST_CASE ("Phase Auto finds the angle that makes the low band symmetric", "[aut
     // silence: no result
     const std::vector<float> quiet (3000, 0.0f);
     CHECK (! dsp::phaseauto::search ({ quiet }, rate, 80.0, 400).valid);
+}
+
+TEST_CASE ("Reference metrics region: only that part of the song is analysed", "[automatch][region]")
+{
+    // 6 s of a 60 Hz tone, then 6 s of bright noise: the region of the noise has almost no Sub
+    const double fs = 44100.0;
+    const int half = (int) (6.0 * fs);
+    juce::AudioBuffer<float> b (2, 2 * half);
+    uint32_t s = 3u;
+    for (int i = 0; i < 2 * half; ++i)
+    {
+        s = s * 1664525u + 1013904223u;
+        const float v = i < half ? 0.5f * (float) std::sin (2.0 * 3.14159265 * 60.0 * i / fs) : 0.3f * ((float) (s >> 8) / 16777216.0f * 2.0f - 1.0f);
+        b.setSample (0, i, v);
+        b.setSample (1, i, v);
+    }
+    const auto file = juce::File::createTempFile (".wav");
+    {
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::OutputStream> os (file.createOutputStream());
+        REQUIRE (os != nullptr);
+        auto w = wav.createWriterFor (os, juce::AudioFormatWriterOptions().withSampleRate (fs).withNumChannels (2).withBitsPerSample (24));
+        REQUIRE (w != nullptr);
+        w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+    }
+    std::atomic<bool> cancel { false };
+    juce::String err;
+    const auto whole = reference::analyseFile (file, {}, cancel, err);
+    const auto region = reference::analyseFile (file, {}, cancel, err, 7.0, 12.0);
+    file.deleteFile();
+    REQUIRE (whole.has_value());
+    REQUIRE (region.has_value());
+    INFO ("Sub share whole " << whole->tonal[0] << " dB, region " << region->tonal[0] << " dB; duration " << region->durationSeconds);
+    CHECK (region->tonal[0] < whole->tonal[0] - 10.0);
+    CHECK (std::abs (region->durationSeconds - 5.0) < 0.1);
 }

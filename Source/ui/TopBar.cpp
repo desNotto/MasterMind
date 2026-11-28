@@ -58,12 +58,17 @@ public:
 
     void mouseUp (const juce::MouseEvent& e) override
     {
-        if (e.mods.isPopupMenu())
-            owner.showRefMenu (index);
-        else if (owner.ctx.refs.slot (index).state == reference::ReferenceLibrary::State::empty)
-            owner.loadRefFile (index);
-        else
-            owner.selectRef (index);
+        // 1-6 only switch between loaded references; empty buttons and the right click do nothing (D-041)
+        if (e.mods.isPopupMenu() || owner.ctx.refs.slot (index).state != reference::ReferenceLibrary::State::ready)
+            return;
+        owner.selectRef (index);
+    }
+
+    void refreshCursor()
+    {
+        const bool ready = owner.ctx.refs.slot (index).state == reference::ReferenceLibrary::State::ready;
+        setMouseCursor (ready ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+        setAlpha (ready || owner.ctx.refs.slot (index).state == reference::ReferenceLibrary::State::analysing ? 1.0f : 0.45f);
     }
 
     TopBar& owner;
@@ -147,7 +152,10 @@ void TopBar::update()
 
     bypass.setToggleState (ctx.monitoring.chainBypass.load(), juce::dontSendNotification);
     for (auto& r : refButtons)
+    {
+        r->refreshCursor();
         r->repaint();
+    }
     repaint (meterArea);
 }
 
@@ -421,97 +429,35 @@ void TopBar::saveAs()
 
 void TopBar::selectRef (int slot)
 {
-    // 1-6 only choose the reference for the analysis and Auto match; they never start or switch
-    // playback, which belongs to the References tab (mockup v18)
-    ctx.refs.choose (slot);
+    // 1-6 switch between the loaded references (D-041): the analysis, the checks and Auto match use
+    // the new one. They never start playback; when a reference is in the player, the player moves to
+    // the new song and keeps playing or pausing.
+    if (ctx.monitoring.referenceActive.load())
+        ctx.refs.select (slot);
+    else
+        ctx.refs.choose (slot);
     update();
-}
-
-void TopBar::loadRefFile (int slot)
-{
-    chooser = std::make_unique<juce::FileChooser> ("Load reference " + juce::String (slot + 1), juce::File(), "*.wav;*.flac;*.mp3;*.ogg;*.aif;*.aiff", true, false, getTopLevelComponent());
-    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this, slot] (const juce::FileChooser& fc)
-    {
-        if (fc.getResult().existsAsFile())
-        {
-            ctx.refs.load (slot, fc.getResult());
-            ctx.proc.syncExtraState();
-        }
-    });
-}
-
-void TopBar::showRefMenu (int slot)
-{
-    const auto& s = ctx.refs.slot (slot);
-    juce::PopupMenu menu;
-    menu.addSectionHeader ("Reference " + juce::String (slot + 1) + (s.file != juce::File() ? ": " + s.file.getFileName() : juce::String()));
-    if (s.state == reference::ReferenceLibrary::State::failed)
-        menu.addItem (0, s.error, false);
-    menu.addItem (1, "Load file...");
-    menu.addItem (2, "Clear", s.state != reference::ReferenceLibrary::State::empty);
-    menu.addItem (3, "In reference set (target and corridor)", s.state == reference::ReferenceLibrary::State::ready, s.inSet);
-    menu.addSeparator();
-    juce::PopupMenu matchMenu;
-    matchMenu.addItem (10, "Auto: current section (short-term)", true, ctx.monitoring.refMatchMode == 0);
-    matchMenu.addItem (11, "Auto: whole track (integrated)", true, ctx.monitoring.refMatchMode == 1);
-    matchMenu.addItem (12, "Manual (0 dB)", true, ctx.monitoring.refMatchMode == 2);
-    menu.addSubMenu ("Loudness matching", matchMenu);
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (refButtons[(size_t) slot].get()), [this, slot] (int r)
-    {
-        auto& mon = ctx.monitoring;
-        if (r == 1)
-            loadRefFile (slot);
-        else if (r == 2)
-        {
-            ctx.refs.clear (slot);
-            mon.referenceActive = ctx.refs.selected() >= 0 && mon.referenceActive.load();
-        }
-        else if (r == 3)
-            ctx.refs.setInSet (slot, ! ctx.refs.slot (slot).inSet);
-        else if (r >= 10 && r <= 12)
-            mon.refMatchMode = r - 10;
-        ctx.proc.syncExtraState();
-        update();
-    });
 }
 
 bool TopBar::isInterestedInFileDrag (const juce::StringArray& files)
 {
+    // presets only: references are loaded on the References tab (D-041)
     for (const auto& f : files)
-        if (juce::File (f).hasFileExtension ("wav;flac;mp3;ogg;aif;aiff;mbpreset"))
+        if (juce::File (f).hasFileExtension ("mbpreset"))
             return true;
     return false;
 }
 
-void TopBar::filesDropped (const juce::StringArray& files, int x, int y)
+void TopBar::filesDropped (const juce::StringArray& files, int, int)
 {
-    int slot = -1;
-    for (size_t i = 0; i < refButtons.size(); ++i)
-        if (refButtons[i]->getBounds().expanded (2).contains (x, y))
-            slot = (int) i;
     for (const auto& path : files)
     {
         const juce::File f (path);
-        if (f.hasFileExtension ("mbpreset"))
-        {
-            juce::String err;
-            if (ctx.presets.importFile (f, err) != presets::PresetManager::Result::ok && ctx.notify)
-                ctx.notify (err);
+        if (! f.hasFileExtension ("mbpreset"))
             continue;
-        }
-        if (slot < 0) // first empty slot
-            for (int i = 0; i < reference::ReferenceLibrary::numSlots; ++i)
-                if (ctx.refs.slot (i).state == reference::ReferenceLibrary::State::empty)
-                {
-                    slot = i;
-                    break;
-                }
-        if (slot >= 0)
-        {
-            ctx.refs.load (slot, f);
-            slot = -1;
-        }
+        juce::String err;
+        if (ctx.presets.importFile (f, err) != presets::PresetManager::Result::ok && ctx.notify)
+            ctx.notify (err);
     }
-    ctx.proc.syncExtraState();
 }
 } // namespace mm::ui

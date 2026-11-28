@@ -7,6 +7,7 @@
 #include <juce_events/juce_events.h>
 
 #include <array>
+#include <map>
 #include <memory>
 #include <optional>
 
@@ -52,8 +53,23 @@ public:
         float progress = 0.0f;
         juce::String error;
         std::optional<TrackAnalysis> analysis;
+        std::optional<TrackAnalysis> regionAnalysis; // the metrics region of the song, when one is set
         bool inSet = true;
+        /** What the analysis, the checks and Auto match use: the region, else the whole song. */
+        const TrackAnalysis* metrics() const { return regionAnalysis ? &*regionAnalysis : (analysis ? &*analysis : nullptr); }
     };
+
+    /** Metrics region of a song (seconds), set on the References tab (D-041). end <= start: none. */
+    struct Region
+    {
+        double start = 0.0, end = 0.0;
+        bool valid() const { return end > start + 0.5; }
+    };
+    Region region (const juce::File& file) const;
+    /** Sets or clears (end <= start) the region; every slot with this song is analysed again. */
+    void setRegion (const juce::File& file, double start, double end);
+    /** True while a region analysis runs for this song. */
+    bool isAnalysingRegion (const juce::File& file) const;
 
     ReferenceLibrary (monitoring::Monitoring& monitoring, juce::File cacheFolder);
     ~ReferenceLibrary() override;
@@ -91,6 +107,10 @@ public:
 private:
     class AnalyseJob;
     class DecodeJob;
+    class RegionJob;
+    void startRegionJobs (const juce::File& file);
+    std::map<juce::String, Region> regions; // by full path
+    std::map<juce::String, int> regionJobs;  // running region analyses by full path
     void finished (int index, const juce::File& file, std::optional<TrackAnalysis> result, juce::String error);
     void recomputeTarget();
 

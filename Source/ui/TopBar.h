@@ -28,10 +28,8 @@ private:
     class RefButton;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void showPresetMenu();
-    void showRefMenu (int slot);
     void saveAs();
     void selectRef (int slot);
-    void loadRefFile (int slot);
 
     Context& ctx;
     bool compact = false, medium = false;

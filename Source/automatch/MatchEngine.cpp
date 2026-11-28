@@ -27,9 +27,25 @@ const BandMap bandMap[6] = {
     { 5, 0, 3500.0f, 0.9f },   // Presence: bell
     { 10, 0, 8000.0f, 0.71f }, // Air: band 10 high shelf
 };
-constexpr int dimEq0 = 0, dimMb0 = 6, dimBus = 11, dimInfl = 12, dimDrive = 13, dimMidW = 14, dimHighW = 15;
+constexpr int dimEq0 = 0, dimMb0 = 6, dimBus = 11, dimInfl = 12, dimDrive = 13, dimMidW = 14, dimHighW = 15, dimTrans = 16, dimSatLow = 17;
+constexpr float maxLowBoostDb = 3.0f; // Sub and Bass: at most +3 dB by EQ, the rest by harmonics (D-041)
 
 double sq (double v) { return v * v; }
+
+/** Tonal deviation per band with the median removed. The tonal balance is a share of the total, so
+    one band that misses energy makes all others look too loud; without the common part the missing
+    band stays the only one to correct (D-041). */
+std::array<double, 6> tonalDeviation (const std::array<double, 6>& ours, const std::array<double, 6>& target)
+{
+    std::array<double, 6> d {}, sorted {};
+    for (size_t b = 0; b < 6; ++b)
+        d[b] = sorted[b] = ours[b] - target[b];
+    std::sort (sorted.begin(), sorted.end());
+    const double median = 0.5 * (sorted[2] + sorted[3]);
+    for (auto& v : d)
+        v -= median;
+    return d;
+}
 
 /** The six tonal crest factors folded onto the five Multiband bands. */
 std::array<double, 5> crest5 (const std::array<double, 6>& c) { return { c[0], c[1], 0.5 * (c[2] + c[3]), c[4], c[5] }; }
@@ -40,7 +56,8 @@ const std::vector<Dim>& dims()
     static const std::vector<Dim> d = [] {
         std::vector<Dim> v;
         for (const auto& m : bandMap)
-            v.push_back ({ params::eq (m.band, "gain"), -9.0f, 9.0f, 0.0f });
+            // mastering moves: Sub and Bass up to +3 dB, Low-mid (mud) up to +2 dB, the rest +-4 dB
+            v.push_back ({ params::eq (m.band, "gain"), m.band <= 2 ? -6.0f : -4.0f, m.band <= 2 ? maxLowBoostDb : (m.band == 3 ? 2.0f : 4.0f), 0.0f });
         for (int b = 1; b <= 5; ++b)
             v.push_back ({ params::mb (b, "thr"), -40.0f, 0.0f, 0.0f });
         v.push_back ({ "bus_thr", -30.0f, 0.0f, 0.0f });
@@ -48,6 +65,9 @@ const std::vector<Dim>& dims()
         v.push_back ({ "lim_drive", 0.0f, 24.0f, 0.0f });
         v.push_back ({ "st_mid_width", 60.0f, 150.0f, 100.0f });
         v.push_back ({ "st_high_width", 60.0f, 160.0f, 100.0f });
+        // a missing low end comes from harmonics rather than energy: Translator and the low band of Saturation
+        v.push_back ({ "lem_tr_amount", 0.0f, 60.0f, 0.0f });
+        v.push_back ({ params::sat (1, "drive"), 0.0f, 8.0f, 2.0f });
         return v;
     }();
     return d;
@@ -73,7 +93,7 @@ void fromUnit (const std::vector<double>& x, ParamMap& p)
     {
         float v = d[i].lo + (float) std::clamp (x[i], 0.0, 1.0) * (d[i].hi - d[i].lo);
         // the knob steps of the plugin: 0.1 dB, whole percent
-        v = (i == (size_t) dimInfl || i == (size_t) dimMidW || i == (size_t) dimHighW) ? std::round (v) : std::round (v * 10.0f) / 10.0f;
+        v = (i == (size_t) dimInfl || i == (size_t) dimMidW || i == (size_t) dimHighW || i == (size_t) dimTrans) ? std::round (v) : std::round (v * 10.0f) / 10.0f;
         p[d[i].id] = v;
     }
 }
@@ -81,8 +101,9 @@ void fromUnit (const std::vector<double>& x, ParamMap& p)
 double cost (const Features& f, const Target& t, const std::vector<double>& x, const std::vector<double>& prior, double priorWeight)
 {
     double c = 0.0;
+    const auto dev = tonalDeviation (f.tonal, t.tonal);
     for (size_t b = 0; b < 6; ++b)
-        c += sq ((f.tonal[b] - t.tonal[b]) / std::max (0.75, t.corridor[b]));
+        c += sq (dev[b] / std::max (0.75, t.corridor[b]));
     c += 1.5 * sq ((f.lufs - t.lufs) / 0.5);
     if (t.hasCrest)
         for (size_t b = 0; b < 6; ++b)
@@ -95,6 +116,20 @@ double cost (const Features& f, const Target& t, const std::vector<double>& x, c
         c += 2.0 * sq ((f.truePeak - t.ceiling) / 0.1);
     if (t.hasHarshness)
         c += 0.3 * sq (std::max (0.0, f.harshness - t.harshness - 1.0));
+    // a low boost by EQ costs more than a cut: it makes the low end boom (D-041)
+    for (size_t i = 0; i < 3 && i < x.size(); ++i)
+    {
+        const auto& d = dims()[i];
+        const double g = d.lo + x[i] * (d.hi - d.lo);
+        if (g > 0.0)
+            c += i < 2 ? sq (g / 2.0) : 0.5 * sq (g / 1.5); // Low-mid boosts add mud
+    }
+    // boom: Sub and Bass more sustained (lower crest factor) than the reference
+    if (t.hasCrest)
+        for (size_t b = 0; b < 2; ++b)
+            c += sq (std::max (0.0, t.crest[b] - f.crest[b] - 0.5));
+    // pumping: the limiter gain reduction moving with the bass
+    c += 0.8 * sq (std::max (0.0, f.grStd - 1.0) / 0.5);
     for (size_t i = 0; i < x.size() && i < prior.size(); ++i)
         c += priorWeight * sq ((x[i] - prior[i]) / 0.5);
     return c;
@@ -105,7 +140,8 @@ ParamMap fixedSetup (const ParamMap& current, double inputLufs)
     ParamMap p;
     p["in_on"] = 1.0f;
     p["hpf_on"] = 1.0f;
-    p["hpf_freq"] = 25.0f;
+    p["hpf_freq"] = 30.0f; // clean low end: no energy below 30 Hz (D-041)
+    p["hpf_slope"] = 1.0f;
     p["in_trim"] = inputLufs > -70.0 ? std::clamp (std::round ((-16.0f - (float) inputLufs) * 2.0f) / 2.0f, -12.0f, 12.0f) : 0.0f;
     p["eq_on"] = 1.0f;
     for (const auto& m : bandMap)
@@ -117,6 +153,22 @@ ParamMap fixedSetup (const ParamMap& current, double inputLufs)
         p[params::eq (m.band, "dyn")] = 0.0f;
         p[params::eq (m.band, "place")] = 0.0f;
     }
+    // Sub and Bass are dynamic: the boost backs off by up to 3 dB while the low band is loud, so a
+    // kick keeps its weight and long bass notes do not boom. The threshold is set after the neutral
+    // pass (0 dBFS until then: no action).
+    for (int b = 1; b <= 2; ++b)
+    {
+        p[params::eq (b, "dyn")] = 1.0f;
+        p[params::eq (b, "mode")] = 0.0f;
+        p[params::eq (b, "thr")] = 0.0f;
+        p[params::eq (b, "range")] = 3.0f;
+        p[params::eq (b, "att")] = 15.0f;
+        p[params::eq (b, "rel")] = 120.0f;
+    }
+    // clean low end: mono below 120 Hz; Translator ready (its amount is a search knob)
+    for (auto [id, v] : { std::pair { "lem_on", 1.0f }, { "lem_mono_on", 1.0f }, { "lem_mono_freq", 120.0f }, { "lem_mono_slope", 1.0f },
+                          { "lem_mono_amount", 100.0f }, { "lem_tr_on", 1.0f }, { "lem_tr_mix", 50.0f } })
+        p[id] = v;
     p["mb_on"] = 1.0f;
     p["mb_xover_type"] = 0.0f;
     for (int b = 1; b <= 5; ++b)
@@ -134,7 +186,8 @@ ParamMap fixedSetup (const ParamMap& current, double inputLufs)
     const float sat[3][4] = { { 2.0f, 1.0f, 100.0f, 0.0f }, { 1.0f, 0.0f, 50.0f, 0.0f }, { 0.0f, 0.0f, 100.0f, 0.0f } };
     for (int b = 1; b <= 3; ++b)
     {
-        p[params::sat (b, "drive")] = sat[b - 1][0];
+        if (b > 1) // the low band drive is a search knob
+            p[params::sat (b, "drive")] = sat[b - 1][0];
         p[params::sat (b, "type")] = sat[b - 1][1];
         p[params::sat (b, "mix")] = sat[b - 1][2];
         p[params::sat (b, "bias")] = sat[b - 1][3];
@@ -208,6 +261,8 @@ Features Twin::run (const ParamMap& knobs, const juce::AudioBuffer<float>& audio
         work.copyFrom (ch, 0, audio, std::min (ch, audio.getNumChannels() - 1), 0, n);
     Features f;
     int meterBlocks = 0;
+    std::array<double, 2> eqSum {};
+    grMeans.clear();
     constexpr int block = 512;
     for (int start = 0; start < n; start += block)
     {
@@ -226,6 +281,15 @@ Features Twin::run (const ParamMap& knobs, const juce::AudioBuffer<float>& audio
             }
             f.busLevel += std::max (-100.0f, h.chain.getBusComp().detectorLevelDb());
             f.busGr += -h.chain.getBusComp().gainReductionDb();
+            for (int b = 0; b < 2; ++b)
+                eqSum[(size_t) b] += std::max (-100.0f, h.chain.getEq().detectorLevelDb (b));
+            if (const float* tr = h.chain.limiterTrace())
+            {
+                double sum = 0.0;
+                for (int i = 0; i < len; ++i)
+                    sum += tr[i];
+                grMeans.push_back (sum / len);
+            }
             ++meterBlocks;
         }
     }
@@ -238,6 +302,16 @@ Features Twin::run (const ParamMap& knobs, const juce::AudioBuffer<float>& audio
         }
         f.busLevel = f.busLevel / meterBlocks;
         f.busGr /= meterBlocks;
+        for (size_t b = 0; b < 2; ++b)
+            f.eqLevel[b] = eqSum[b] / meterBlocks;
+    }
+    if (grMeans.size() > 2)
+    {
+        const double mean = std::accumulate (grMeans.begin(), grMeans.end(), 0.0) / (double) grMeans.size();
+        double var = 0.0;
+        for (auto g : grMeans)
+            var += sq (g - mean);
+        f.grStd = std::sqrt (var / (double) grMeans.size());
     }
     auto& a = h.analyzer;
     f.tonal = a.tonalIntegrated();
@@ -310,8 +384,19 @@ ParamMap Matcher::formula (const ParamMap& start, const Features& f0)
 {
     ParamMap p = start;
     // EQ: the tonal difference, a little less than all of it (the dynamics move the balance too)
+    double missingLow = 0.0;
+    const auto dev = tonalDeviation (f0.tonal, target.tonal);
     for (size_t b = 0; b < 6; ++b)
-        p[dims()[(size_t) dimEq0 + b].id] = std::clamp (std::round (-8.5f * (float) (f0.tonal[b] - target.tonal[b])) / 10.0f, -9.0f, 9.0f);
+    {
+        const auto& d = dims()[(size_t) dimEq0 + b];
+        const float want = std::round (-8.5f * (float) dev[b]) / 10.0f;
+        p[d.id] = std::clamp (want, d.lo, d.hi);
+        if (b < 2)
+            missingLow = std::max (missingLow, (double) (want - d.hi));
+    }
+    // what the capped low boost cannot give comes from harmonics (Translator, low band Saturation)
+    p["lem_tr_amount"] = (float) std::round (std::clamp (missingLow * 12.0, 0.0, 50.0));
+    p[params::sat (1, "drive")] = (float) std::clamp (std::round ((2.0 + missingLow) * 10.0) / 10.0, 0.0, 8.0);
     // compression: target gain reduction from the crest factor above the reference (D-031)
     double excess = 0.0;
     if (target.hasCrest)
@@ -345,10 +430,12 @@ ParamMap Matcher::formula (const ParamMap& start, const Features& f0)
 
 void Matcher::correct (ParamMap& p, const Features& f, const std::array<double, 5>& targetGr)
 {
+    const auto dev = tonalDeviation (f.tonal, target.tonal);
     for (size_t b = 0; b < 6; ++b)
     {
-        auto& g = p[dims()[(size_t) dimEq0 + b].id];
-        g = std::clamp (std::round ((g - 0.85f * (float) (f.tonal[b] - target.tonal[b])) * 10.0f) / 10.0f, -9.0f, 9.0f);
+        const auto& d = dims()[(size_t) dimEq0 + b];
+        auto& g = p[d.id];
+        g = std::clamp (std::round ((g - 0.85f * (float) dev[b]) * 10.0f) / 10.0f, d.lo, d.hi);
     }
     for (size_t b = 0; b < 5; ++b)
         if (targetGr[b] > 0.0)
@@ -469,9 +556,10 @@ void Matcher::run()
     if (threadShouldExit())
         return;
     ParamMap fixes;
-    if (f0.lowCorr < 0.8)
-        for (auto [id, v] : { std::pair { "lem_on", 1.0f }, { "lem_mono_on", 1.0f }, { "lem_mono_freq", 120.0f }, { "lem_mono_amount", 100.0f } })
-            fixes[id] = v;
+    // the dynamic Sub and Bass bands act above the average level of their band
+    for (int b = 0; b < 2; ++b)
+        if (f0.eqLevel[(size_t) b] > -90.0)
+            fixes[params::eq (b + 1, "thr")] = (float) std::clamp (std::round (f0.eqLevel[(size_t) b] + 1.0), -60.0, 0.0);
     if (target.hasHarshness && f0.harshness - target.harshness > 1.5)
         for (auto [id, v] : { std::pair { "rs_on", 1.0f }, { "rs_low", 2000.0f }, { "rs_high", 8000.0f }, { "rs_depth", 4.0f } })
             fixes[id] = v;

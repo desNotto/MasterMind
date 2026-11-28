@@ -19,7 +19,7 @@ namespace mm::automatch
     - Fast: one neutral pass, then the knobs are set by formulas (after Matchering and the Ozone
       Master Assistant: EQ from the tonal difference, compression from the crest factor, width from
       the side share, Maximizer gain from the loudness), then three short correction passes.
-    - Precise: a search over 16 knobs (separable CMA-ES, after ST-ITO by Steinmetz et al., ISMIR 2024)
+    - Precise: a search over 18 knobs (separable CMA-ES, after ST-ITO by Steinmetz et al., ISMIR 2024)
       from neutral settings, with a prior that keeps the knobs near neutral unless the match needs it.
     - Hybrid: Fast gives the starting point, then a short search around it.
 
@@ -37,6 +37,8 @@ struct Features
     // module meters averaged over the excerpt (for the formulas)
     std::array<double, 5> mbLevel {}, mbGr {};
     double busLevel = -100.0, busGr = 0.0;
+    std::array<double, 2> eqLevel { -100.0, -100.0 }; // detector level of the dynamic EQ bands 1 and 2
+    double grStd = 0.0; // pumping: standard deviation of the limiter gain reduction (10 ms means), dB
 };
 
 /** The reference the match aims at (reference set or the selected reference). */
@@ -79,6 +81,7 @@ private:
     std::unique_ptr<Host> host;
     double fs;
     juce::AudioBuffer<float> work;
+    std::vector<double> grMeans;
 };
 
 enum class Mode

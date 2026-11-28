@@ -8,7 +8,7 @@ import re
 import sys
 
 root = pathlib.Path(__file__).resolve().parent.parent
-default = root / 'docs/mockups/m1-main-window-v18-2026-11-28/mockup.html'
+default = root / 'docs/mockups/m1-main-window-v19-2026-11-28/mockup.html'
 mockup = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else default
 src = mockup.read_text(encoding='utf-8')
 
