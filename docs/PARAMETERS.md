@@ -264,7 +264,7 @@ Generated from `Source/state/Parameters.cpp`. The IDs are frozen since M1 (spec 
 | `st_ms_balance` | Mid/Side Balance | −6.0 dB to 6.0 dB | 0.0 dB | yes |
 | `st_guard_on` | Correlation Guard | Off / On | Off | yes |
 | `st_guard_thr` | Guard Threshold | -1.00 to 1.00 | 0.00 | yes |
-| `clip_on` | Clipper On | Off / On | Off | yes |
+| `clip_on` | Inflator On | Off / On | Off | yes |
 | `clip_type` | Clipper Type | Hard, Soft, Soft knee, Diode | Soft | yes |
 | `clip_thr` | Clipper Threshold | −12.0 dBFS to 0.0 dBFS | −1.0 dBFS | yes |
 | `clip_shape` | Clipper Shape | 0% to 100% | 50% | yes |
@@ -291,3 +291,13 @@ Generated from `Source/state/Parameters.cpp`. The IDs are frozen since M1 (spec 
 | `sat_b3_mute` | Saturation High Mute | Off / On | Off | yes |
 | `clip_drive` | Clipper Drive | 0.0 dB to 24.0 dB | 0.0 dB | yes |
 | `out_target` | Output Target Loudness | −30.0 LUFS to −3.0 LUFS | −9.0 LUFS | no |
+| `infl_input` | Inflator Input | −6.0 dB to 12.0 dB | 0.0 dB | yes |
+| `infl_effect` | Inflator Effect | 0% to 100% | 30% | yes |
+| `infl_curve` | Inflator Curve | -50.0 to 50.0 | 0.00 | yes |
+| `infl_output` | Inflator Output | −12.0 dB to 0.0 dB | 0.0 dB | yes |
+| `infl_clip` | Inflator Clip 0 dB | Off / On | On | yes |
+| `infl_split` | Inflator Band Split | Off / On | Off | yes |
+| `lim_bands` | Limiter Bands | Classic, 8, 16, 26 | 26 | no |
+| `lim_adapt_gain` | Limiter Adaptive Gain | 0.0 dB to 12.0 dB | 6.0 dB | yes |
+| `lim_adapt_speed` | Limiter Adaptive Speed | 0% to 100% | 70% | yes |
+| `lim_adapt_trans` | Limiter Adaptive Transients | 0% to 100% | 50% | yes |

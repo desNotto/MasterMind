@@ -5,6 +5,7 @@
 #include "ui/Locale.h"
 #include "ui/ModuleEditors.h"
 #include "ui/PluginEditor.h"
+#include "ui/TooltipText.h"
 #include "ui/Widgets.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -35,6 +36,41 @@ void collect (juce::Component* c, std::vector<juce::Component*>& out)
         out.push_back (c);
     for (auto* child : c->getChildren())
         collect (child, out);
+}
+
+/** Every visible knob has a tooltip text with advice (D-034, D-038): returns the number of misses. */
+int checkKnobTips (juce::Component& root, const juce::String& label)
+{
+    std::vector<juce::Component*> all;
+    std::function<void (juce::Component*)> walk = [&] (juce::Component* c)
+    {
+        for (auto* ch : c->getChildren())
+        {
+            if (ch->isVisible())
+            {
+                all.push_back (ch);
+                walk (ch);
+            }
+        }
+    };
+    walk (&root);
+    int misses = 0;
+    for (auto* c : all)
+        if (dynamic_cast<mm::ui::Knob*> (c) != nullptr)
+        {
+            const auto tip = c->getProperties()[mm::ui::tipProperty].toString();
+            bool ok = false;
+            if (tip.startsWith ("k:"))
+                for (const auto& k : mm::ui::tips::knobs())
+                    if (tip.substring (2) == k.id)
+                        ok = juce::String (k.text).isNotEmpty() && juce::String (k.tip).isNotEmpty();
+            if (! ok)
+            {
+                std::printf ("%s: knob without tooltip advice (%s)\n", label.toRawUTF8(), tip.toRawUTF8());
+                ++misses;
+            }
+        }
+    return misses;
 }
 
 int checkLayout (juce::Component& root, const juce::String& label)
@@ -262,6 +298,8 @@ int main (int argc, char** argv)
                 editor->forceUpdate();
             }
             failures += checkLayout (editor->getRoot(), juce::String (w) + "x" + juce::String (h) + " Master " + mm::ui::moduleList()[(size_t) m].key);
+            if (w == 1280)
+                failures += checkKnobTips (editor->getRoot(), juce::String ("tips Master ") + mm::ui::moduleList()[(size_t) m].key);
         }
     for (const auto& s : shots)
     {
@@ -279,6 +317,7 @@ int main (int argc, char** argv)
         const juce::String mod = juce::String (s.tab) == "Master" ? juce::String ("-") + mm::ui::moduleList()[(size_t) s.module].key : juce::String();
         const juce::String label = juce::String (s.w) + "x" + juce::String (s.h) + " " + s.tab + mod + (s.monitor ? " monitor" : "");
         failures += checkLayout (editor->getRoot(), label);
+        failures += checkKnobTips (editor->getRoot(), label);
         auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
         const auto file = outDir.getChildFile (juce::String (s.w) + "x" + juce::String (s.h) + "-" + juce::String (s.tab).toLowerCase() + mod + (s.monitor ? "-monitor" : "") + ".png");
         file.deleteFile();

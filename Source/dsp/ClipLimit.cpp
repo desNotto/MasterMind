@@ -268,9 +268,10 @@ void Limiter::prepare (const Context& ctx)
         safety->settings.lookaheadMs = 1.0f;
         safety->settings.mode = 2;
         safety->prepare (ctx);
-        for (auto* v : { &driven, &shaped, &full })
+        for (auto* v : { &driven, &shaped, &full, &proc })
             for (auto& c : *v)
                 c.assign ((size_t) maxBlock, 0.0f);
+        tailBypass.prepare (2, clip->latency() + safety->latency() + 8);
     }
     reset();
 }
@@ -284,6 +285,10 @@ void Limiter::reset()
         bank->reset();
         clip->reset();
         safety->reset();
+        tailBypass.setDelay (clip->latency() + safety->latency());
+        tailBypass.reset();
+        tail = Tail::off;
+        tailCount = 0;
     }
     lookahead = std::clamp ((int) std::lround (settings.lookaheadMs * 0.001 * fs), 1, maxLookahead);
     for (auto& d : detector)
@@ -296,6 +301,8 @@ void Limiter::reset()
     sampleIndex = 0;
     drive.reset (dbToGain (settings.driveDb));
     grMeter.set (0.0f);
+    const int core = lookahead + detector[0].latency();
+    latencyCache.store (spectral() ? bank->latency() + core + clip->latency() + safety->latency() : core, std::memory_order_relaxed);
 }
 
 void Limiter::process (float* left, float* right, int numSamples) noexcept
@@ -319,7 +326,21 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
     bs.adaptGainDb = settings.adaptGainDb;
     bs.adaptSpeed = settings.adaptSpeed;
     bs.adaptTrans = settings.adaptTrans;
-    bs.emphasis = settings.transient;
+    // the attack emphasis is only on while the clipper and the safety stage run (state machine below)
+    const bool wantTail = settings.transient > 1.0e-4f;
+    if (tail == Tail::off && wantTail)
+    {
+        clip->reset();
+        safety->reset();
+        tail = Tail::warming;
+        tailCount = clip->latency() + safety->latency() + 2 * lookahead + 64;
+    }
+    else if (tail == Tail::on && ! wantTail)
+    {
+        tail = Tail::draining; // emphasised samples still inside the bands and the core
+        tailCount = bank->latency() + lookahead + detector[0].latency() + 64;
+    }
+    bs.emphasis = tail == Tail::on ? settings.transient : 0.0f;
     bs.link = settings.link;
     bs.mode = settings.mode;
     bs.ceiling = dbToGain (settings.ceilingDb);
@@ -335,11 +356,62 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
     float* det[2] = { shaped[0].data(), shaped[1].data() };
     float* app[2] = { full[0].data(), full[1].data() };
     processCore (det, app, io, numSamples, false);
-    clip->settings.thresholdDb = settings.ceilingDb;
-    clip->process (left, right, numSamples);
-    safety->settings.ceilingDb = settings.ceilingDb;
-    safety->settings.link = settings.link;
-    safety->process (left, right, numSamples);
+    if (tail != Tail::off)
+    {
+        std::copy (left, left + numSamples, proc[0].begin());
+        std::copy (right, right + numSamples, proc[1].begin());
+        clip->settings.thresholdDb = settings.ceilingDb;
+        clip->process (proc[0].data(), proc[1].data(), numSamples);
+        safety->settings.ceilingDb = settings.ceilingDb;
+        safety->settings.link = settings.link;
+        safety->process (proc[0].data(), proc[1].data(), numSamples);
+    }
+    tailBypass.process (io, 2, numSamples);
+    const int fadeLen = (int) (0.01 * fs);
+    for (int i = 0; i < numSamples; ++i)
+    {
+        switch (tail)
+        {
+            case Tail::off:
+            case Tail::warming:
+            {
+                // no emphasis on this path: the core already keeps the ceiling; the clamp is the last guard
+                const float hc = (float) dbToGain (settings.ceilingDb);
+                left[i] = std::clamp (left[i], -hc, hc);
+                right[i] = std::clamp (right[i], -hc, hc);
+                if (tail == Tail::off)
+                    break;
+                if (--tailCount <= 0)
+                    tail = Tail::fadeIn, tailCount = 0;
+                break;
+            }
+            case Tail::fadeIn:
+            {
+                const float t = (float) ++tailCount / (float) fadeLen;
+                left[i] += (proc[0][(size_t) i] - left[i]) * t;
+                right[i] += (proc[1][(size_t) i] - right[i]) * t;
+                if (tailCount >= fadeLen)
+                    tail = Tail::on;
+                break;
+            }
+            case Tail::on:
+            case Tail::draining:
+                left[i] = proc[0][(size_t) i];
+                right[i] = proc[1][(size_t) i];
+                if (tail == Tail::draining && --tailCount <= 0)
+                    tail = Tail::fadeOut, tailCount = 0;
+                break;
+            case Tail::fadeOut:
+            {
+                const float t = 1.0f - (float) ++tailCount / (float) fadeLen;
+                left[i] += (proc[0][(size_t) i] - left[i]) * t;
+                right[i] += (proc[1][(size_t) i] - right[i]) * t;
+                if (tailCount >= fadeLen)
+                    tail = Tail::off;
+                break;
+            }
+        }
+    }
     float outPk = 0.0f;
     for (int i = 0; i < numSamples; ++i)
         outPk = std::max (outPk, std::max (std::abs (left[i]), std::abs (right[i])));

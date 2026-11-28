@@ -2,6 +2,7 @@
 
 #include "dsp/Module.h"
 #include "dsp/Oversampler.h"
+#include "dsp/Filters.h"
 #include "dsp/SpectralBank.h"
 #include "dsp/TruePeak.h"
 
@@ -70,11 +71,8 @@ public:
     void prepare (const Context& ctx) override;
     void reset() override;
     void process (float* left, float* right, int numSamples) noexcept override;
-    int latency() const noexcept override
-    {
-        const int core = lookahead + detector[0].latency();
-        return spectral() ? bank->latency() + core + clip->latency() + safety->latency() : core;
-    }
+    /** Cached at the end of reset(): other threads may ask while prepare() rebuilds the stages. */
+    int latency() const noexcept override { return latencyCache.load (std::memory_order_relaxed); }
 
     /** The spectral band stage (nullptr in Classic or inside the safety stage). */
     const SpectralBank* spectralBank() const noexcept { return spectral() ? bank.get() : nullptr; }
@@ -139,9 +137,15 @@ private:
     std::unique_ptr<SpectralBank> bank;
     std::unique_ptr<Clipper> clip;
     std::unique_ptr<Limiter> safety;
-    std::array<std::vector<float>, 2> driven, shaped, full;
+    std::array<std::vector<float>, 2> driven, shaped, full, proc;
+    // The clipper and the safety stage only matter with attack emphasis (Transients > 0). Without it
+    // a delay line of the same length replaces them (about half the CPU); switching crossfades.
+    DelayLine tailBypass;
+    enum class Tail { off, warming, fadeIn, on, draining, fadeOut } tail = Tail::off;
+    int tailCount = 0;
     int activeBands = 0;
     bool nested = false;
+    std::atomic<int> latencyCache { 0 };
 
     double fs = 48000.0;
     int maxBlock = 512, lookahead = 96, maxLookahead = 480, maxHold = 2400, sampleIndex = 0;

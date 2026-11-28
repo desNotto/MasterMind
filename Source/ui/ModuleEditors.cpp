@@ -2388,6 +2388,7 @@ public:
             addAndMakeVisible (*comp);
         auto& curveKnob = makeKnob (*this, "infl_curve", "Curve", "if.curve", clMag, true);
         curveKnob.formatter = [] (float v) { const int c = juce::roundToInt (v); return (c > 0 ? "+" : "") + juce::String (c); };
+        curveKnob.valueStep = 1.0f;
         row = { &makeKnob (*this, "infl_input", "Input", "if.input", clMag), &makeKnob (*this, "infl_effect", "Effect", "if.effect", clMag),
                 &curveKnob, &makeKnob (*this, "infl_output", "Output", "if.output", clMag) };
     }
@@ -2535,53 +2536,105 @@ public:
     int pos = 0;
 };
 
-class LiMeters final : public juce::Component
+/** Band panel (mockup v16): reduction per band hangs down from 0 dB, attack emphasis rises above it.
+    Values are smoothed for reading. Classic: one bar for the whole range. */
+class LiBands final : public juce::Component
 {
 public:
-    LiMeters (Context& c, LiTime& t) : ctx (c), time (t) { setTip (*this, "c:li.meters"); }
+    explicit LiBands (Context& c) : ctx (c) { setTip (*this, "c:li.bview"); }
+    void refresh()
+    {
+        const auto* bank = ctx.proc.getChain().getLimiter().spectralBank();
+        const bool on = ctx.param ("lim_on") >= 0.5f;
+        bands = bank != nullptr ? bank->meterBands.load (std::memory_order_relaxed) : 0;
+        for (int b = 0; b < dsp::SpectralBank::maxBands; ++b)
+        {
+            const float gr = bank != nullptr && on && b < bands ? -bank->bandGrDb[(size_t) b].get() : 0.0f;
+            const float em = bank != nullptr && on && b < bands ? bank->bandEmphDb[(size_t) b].get() : 0.0f;
+            shownGr[(size_t) b] = gr > shownGr[(size_t) b] ? gr : shownGr[(size_t) b] + 0.25f * (gr - shownGr[(size_t) b]);
+            shownEm[(size_t) b] = em > shownEm[(size_t) b] ? em : shownEm[(size_t) b] + 0.25f * (em - shownEm[(size_t) b]);
+        }
+        const float wide = on ? -ctx.proc.getChain().getLimiter().gainReductionDb() : 0.0f;
+        shownWide = wide > shownWide ? wide : shownWide + 0.25f * (wide - shownWide);
+        repaint();
+    }
     void paint (juce::Graphics& g) override
     {
         const auto r = getLocalBounds().toFloat();
         drawBox (g, r);
-        const float now = ctx.param ("lim_on") >= 0.5f ? -ctx.proc.getChain().getLimiter().gainReductionDb() : 0.0f, mx = time.maxGr();
-        const auto bar = [&] (float x, float v, juce::Colour c, const juce::String& label)
+        const float x0 = 26.0f, x1 = r.getWidth() - 30.0f, zero = 46.0f, grBot = r.getHeight() - 30.0f, teTop = 10.0f;
+        const float grMax = 9.0f, teMax = 6.0f;
+        g.setFont (font (10.0f));
+        for (int d : { 0, -3, -6, -9 })
         {
-            const juce::Rectangle<float> b (x - 9.0f, 10.0f, 18.0f, 84.0f);
-            g.setColour (col::sunk);
-            g.fillRoundedRectangle (b, 4.0f);
-            g.setColour (col::line);
-            g.drawRoundedRectangle (b, 4.0f, 1.0f);
-            g.setColour (c);
-            g.fillRoundedRectangle (b.withHeight (b.getHeight() * juce::jlimit (0.0f, 1.0f, v / 12.0f)), 4.0f);
-            g.setFont (font (12.5f, true));
-            g.drawText ((v > 0.05f ? minusSign() : juce::String()) + juce::String (v, 1), juce::Rectangle<float> (x - 30.0f, 98.0f, 60.0f, 15.0f), juce::Justification::centred);
+            const float y = zero + (-d / grMax) * (grBot - zero);
+            g.setColour (d == 0 ? juce::Colour (0xff3a414d) : juce::Colour (0xff1b1f26));
+            g.drawHorizontalLine (juce::roundToInt (y), x0, x1);
             g.setColour (col::text3);
+            g.drawText (d == 0 ? juce::String ("0") : minusSign() + juce::String (-d), juce::Rectangle<float> (x1 + 4.0f, y - 6.0f, 24.0f, 12.0f), juce::Justification::centredLeft);
+        }
+        g.drawText ("+6", juce::Rectangle<float> (x1 + 4.0f, teTop, 24.0f, 12.0f), juce::Justification::centredLeft);
+        const auto Ygr = [&] (float v) { return zero + std::min (v, grMax) / grMax * (grBot - zero); };
+        if (bands == 0)
+        {
+            g.setColour (col::orange.withAlpha (0.55f));
+            g.fillRect (juce::Rectangle<float> (x0 + 2.0f, zero, x1 - x0 - 4.0f, Ygr (shownWide) - zero));
+            g.setColour (col::text2);
             g.setFont (font (11.0f));
-            g.drawText (label, juce::Rectangle<float> (x - 34.0f, 113.0f, 68.0f, 13.0f), juce::Justification::centred);
-        };
-        bar (r.getWidth() * 0.3f, now, col::orange, "GR now");
-        bar (r.getWidth() * 0.7f, mx, juce::Colour (0xffffb877), "GR max");
-        const auto& o = ctx.out();
-        const double ceiling = ctx.param ("lim_ceiling");
-        g.setFont (font (11.5f));
-        g.setColour (col::text3);
-        g.drawText ("True peak out", juce::Rectangle<float> (8.0f, 132.0f, 90.0f, 14.0f), juce::Justification::centredLeft);
-        g.drawText ("Overs", juce::Rectangle<float> (8.0f, 150.0f, 90.0f, 14.0f), juce::Justification::centredLeft);
-        g.setFont (font (11.5f, true));
-        g.setColour (o.truePeak <= ceiling ? col::ok : col::bad);
-        g.drawText (fmtLufs (o.truePeak), juce::Rectangle<float> (r.getWidth() - 58.0f, 132.0f, 50.0f, 14.0f), juce::Justification::centredRight);
-        g.setColour (o.truePeakOvers > 0 ? col::warn : col::ok);
-        g.drawText (juce::String ((juce::int64) o.truePeakOvers), juce::Rectangle<float> (r.getWidth() - 58.0f, 150.0f, 50.0f, 14.0f), juce::Justification::centredRight);
+            g.drawText ("Classic: one band for the whole range", juce::Rectangle<float> (x0, grBot - 30.0f, x1 - x0, 14.0f), juce::Justification::centred);
+            g.setColour (col::text3);
+            g.setFont (font (10.5f));
+            g.drawText ("choose 8, 16 or 26 bands for band limiting", juce::Rectangle<float> (x0, grBot - 16.0f, x1 - x0, 14.0f), juce::Justification::centred);
+        }
+        else
+        {
+            const auto fc = dsp::SpectralBank::centres (bands == 8 ? 0 : (bands == 16 ? 1 : 2));
+            const float bw = (x1 - x0) / (float) bands;
+            for (int b = 0; b < bands; ++b)
+            {
+                const float x = x0 + b * bw + 1.0f, w = std::max (2.0f, bw - 2.0f);
+                const float gr = shownGr[(size_t) b] + shownWide, te = std::min (teMax, shownEm[(size_t) b]);
+                g.setColour (col::orange.withAlpha (fc[(size_t) b] < 120.0 ? 0.85f : 0.6f));
+                g.fillRect (juce::Rectangle<float> (x, zero, w, Ygr (gr) - zero));
+                const float yt = zero - te / teMax * (zero - teTop);
+                g.setColour (col::ok.withAlpha (0.7f));
+                g.fillRect (juce::Rectangle<float> (x, yt, w, zero - yt));
+            }
+            g.setColour (col::text3);
+            g.setFont (font (10.0f));
+            for (auto [label, f] : { std::pair { "50", 50.0 }, { "200", 200.0 }, { "1k", 1050.0 }, { "5k", 5000.0 }, { "15k", 15000.0 } })
+            {
+                int best = 0;
+                for (int b = 0; b < bands; ++b)
+                    if (std::abs (std::log (fc[(size_t) b] / f)) < std::abs (std::log (fc[(size_t) best] / f)))
+                        best = b;
+                const float x = x0 + (best + 0.5f) * bw;
+                g.drawText (label, juce::Rectangle<float> (x - 16.0f, grBot + 4.0f, 32.0f, 12.0f), juce::Justification::centred);
+            }
+        }
+        // legend
+        const float ly = r.getHeight() - 12.0f;
+        g.setColour (col::orange.withAlpha (0.7f));
+        g.fillRect (juce::Rectangle<float> (x0, ly, 10.0f, 7.0f));
+        g.setColour (col::text2);
+        g.setFont (font (10.0f));
+        g.drawText ("GR per band", juce::Rectangle<float> (x0 + 14.0f, ly - 3.0f, 80.0f, 13.0f), juce::Justification::centredLeft);
+        g.setColour (col::ok.withAlpha (0.7f));
+        g.fillRect (juce::Rectangle<float> (x0 + 96.0f, ly, 10.0f, 7.0f));
+        g.setColour (col::text2);
+        g.drawText ("attack emphasis", juce::Rectangle<float> (x0 + 110.0f, ly - 3.0f, 100.0f, 13.0f), juce::Justification::centredLeft);
     }
     Context& ctx;
-    LiTime& time;
+    int bands = 0;
+    std::array<float, dsp::SpectralBank::maxBands> shownGr {}, shownEm {};
+    float shownWide = 0.0f;
 };
 
 class LimiterEditor final : public ModuleEditor
 {
 public:
     explicit LimiterEditor (Context& c)
-        : ModuleEditor (c, 8, "true-peak-safe look-ahead limiter, Drive pushes the level into the ceiling"), time (c), meters (c, time),
+        : ModuleEditor (c, 8, "spectral limiter, bands like the ear hears, each band is limited on its own"), time (c), bandView (c),
           modes (c, "lim_mode", { "Transparent", "Balanced", "Aggressive" }, { "slow, clean, quieter", "for most mixes", "fast, loud, dense" }, "c:li.mode",
                  [] (juce::Graphics& g, juce::Rectangle<float> r, int i)
                  {
@@ -2602,7 +2655,7 @@ public:
                      g.strokePath (p, juce::PathStrokeType (1.6f));
                  })
     {
-        modes.footer = "curve = how GR follows a hit";
+        modes.footer = " ";
         auto& gr = own (std::make_unique<Painter>());
         gr.setInterceptsMouseClicks (false, false);
         gr.draw = [this] (juce::Graphics& g, juce::Rectangle<int> r)
@@ -2621,43 +2674,90 @@ public:
         relAuto.attach (ctx.apvts, "lim_rel_auto");
         setTip (relAuto, "t:Auto release\nThe limiter sets the release time from the music.");
         addRight (relAuto, 98);
-        for (auto* comp : { (juce::Component*) &time, (juce::Component*) &meters, (juce::Component*) &modes })
+        bandsBox.attach (ctx.apvts, "lim_bands");
+        setTip (bandsBox, "c:li.bands");
+        addRight (bandsBox, 92);
+        auto& bandsLabel = own (std::make_unique<Painter>());
+        bandsLabel.setInterceptsMouseClicks (false, false);
+        bandsLabel.draw = [] (juce::Graphics& g, juce::Rectangle<int> r)
+        {
+            g.setColour (col::text3);
+            g.setFont (font (12.5f));
+            g.drawText ("Bands", r, juce::Justification::centredRight);
+        };
+        addRight (bandsLabel, 44);
+        for (auto* comp : { (juce::Component*) &time, (juce::Component*) &bandView, (juce::Component*) &modes })
             addAndMakeVisible (*comp);
         auto& rel = makeKnob (*this, "lim_rel", "Release", "li.rel", clMag);
         rel.textOverride = [this, &rel] { return ctx.param ("lim_rel_auto") >= 0.5f ? juce::String ("Auto") : ctx.apvts.getParameter (rel.getParamId())->getCurrentValueAsText(); };
         rel.onUserChange = [this] { ctx.setParam ("lim_rel_auto", 0.0f); };
         row = { &makeKnob (*this, "lim_drive", "Drive", "li.drive", clMag), &makeKnob (*this, "lim_ceiling", "Ceiling", "li.ceil", clMag), &rel,
-                &makeKnob (*this, "lim_lookahead", "Lookahead", "li.la", clMag), &makeKnob (*this, "lim_link", "Link", "li.link", clMag),
-                &makeKnob (*this, "lim_transient", "Transients", "li.trans", clMag) };
+                &makeKnob (*this, "lim_lookahead", "Lookahead", "li.la", clMag), &makeKnob (*this, "lim_link", "Link", "li.link", clMag) };
+        // the band knobs (D-037); in Classic they show "off"
+        for (auto [id, label, tip] : { std::tuple { "lim_adapt_gain", "Adaptive Gain", "li.again" }, { "lim_adapt_speed", "Adaptive Speed", "li.aspeed" },
+                                       { "lim_transient", "Transients", "li.trans" }, { "lim_adapt_trans", "Adaptive Trans", "li.atrans" } })
+        {
+            auto& k = makeKnob (*this, id, label, tip, clMag);
+            if (juce::String (id) != "lim_transient")
+                k.textOverride = [this, &k]
+                {
+                    return ctx.param ("lim_bands") < 0.5f ? juce::String ("off") : ctx.apvts.getParameter (k.getParamId())->getCurrentValueAsText();
+                };
+            if (juce::String (id) == "lim_adapt_speed" || juce::String (id) == "lim_adapt_trans")
+                k.valueStep = 1.0f;
+            spectralRow.push_back (&k);
+        }
     }
     int naturalHeight (int) const override { return compact ? headH + 8 + 120 + 8 + knobH + 8 : headH + 8 + 176 + 8 + knobH + 8; }
     void update() override
     {
         ModuleEditor::update();
         time.push();
-        meters.repaint();
+        bandView.refresh();
+        const bool classic = ctx.param ("lim_bands") < 0.5f;
+        for (size_t i = 0; i < spectralRow.size(); ++i)
+            if (i != 2)
+                spectralRow[i]->setAlpha (classic ? 0.45f : 1.0f);
+        const auto& o = ctx.out();
+        modes.footer = "max " + fmtMinus (-time.maxGr()) + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "TP " + fmtLufs (o.truePeak)
+                     + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "overs " + juce::String ((juce::int64) o.truePeakOvers);
         modes.repaint();
         readout->repaint();
     }
     void layoutBody (juce::Rectangle<int> r) override
     {
         auto top = r.removeFromTop (compact ? 120 : 176);
-        meters.setVisible (! compact);
+        bandView.setVisible (! compact);
         modes.setVisible (! compact);
         if (! compact)
         {
             modes.setBounds (top.removeFromRight (206));
             top.removeFromRight (10);
-            meters.setBounds (top.removeFromRight (150));
+            bandView.setBounds (top.removeFromRight (300));
             top.removeFromRight (10);
         }
         time.setBounds (top);
         r.removeFromTop (8);
-        layoutKnobRow (r.removeFromTop (knobH), row);
+        auto kr = r.removeFromTop (knobH);
+        const int w = layoutKnobRow (kr, row);
+        separatorX = kr.getX() + w + 12;
+        layoutKnobRow (kr.withTrimmedLeft (w + 25), spectralRow);
+    }
+    void paint (juce::Graphics& g) override
+    {
+        ModuleEditor::paint (g);
+        if (separatorX > 0 && ! row.empty())
+        {
+            g.setColour (col::line);
+            g.drawVerticalLine (separatorX, (float) row.front()->getY() + 4.0f, (float) row.front()->getBottom() - 4.0f);
+        }
     }
     LiTime time;
-    LiMeters meters;
+    LiBands bandView;
     ModeList modes;
+    Dropdown bandsBox;
+    std::vector<Knob*> spectralRow;
+    int separatorX = 0;
     Btn relAuto { "Auto release", true };
     Painter* readout = nullptr;
     std::vector<Knob*> row;

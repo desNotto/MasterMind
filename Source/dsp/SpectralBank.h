@@ -81,13 +81,14 @@ private:
     void designSet (BandSetData& set, int bandSet);
     void runFrame() noexcept;
     void analyse (int ch) noexcept;
+    void analyseShort (int ch) noexcept;
     void computeGains (GainState& st, const float* eLong, const float* eShort, double pressureDb) noexcept;
     void buildFilter (const BandSetData& set, const float* gains, float* dest) noexcept;
     void convolve (int ch, const float* filter, float* out) noexcept;
 
     double fs = 48000.0;
     int blockSize = 256, fftSize = 512, filterLength = 4096, partitions = 16, bins = 257;
-    std::unique_ptr<juce::dsp::FFT> fftBlock, fftLong;
+    std::unique_ptr<juce::dsp::FFT> fftBlock, fftLong, fftAna;
     std::array<BandSetData, 3> sets;
     int activeSet = 2;
 
@@ -105,7 +106,11 @@ private:
 
     // filters: [ch][shaped/full][prev/cur]
     std::array<std::array<std::array<std::vector<float>, 2>, 2>, 2> hg;
-    int cur = 0;
+    int cur = 0, frameCount = 0;
+    // filters equal in both slots (gains did not change): one convolution is enough
+    std::array<std::array<bool, 2>, 2> sameAsPrev {};
+    std::array<bool, 2> fullEq { true, true }, fullEqPrev { true, true };
+    std::array<std::array<std::array<float, maxBands>, 2>, 2> builtGains {};
     std::vector<float> work, work2, windowLong, windowShort, analysisBuf;
     std::array<float, maxBands> linkedGShaped {}, linkedGFull {};
 };

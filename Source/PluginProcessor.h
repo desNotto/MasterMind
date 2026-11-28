@@ -77,6 +77,7 @@ public:
 
     std::atomic<bool> resetOnPlay { true };
     std::atomic<bool> monitorActive { false };
+    std::atomic<bool> preparing { false }; // the worker leaves the latency alone meanwhile
 
 private:
     class Worker;

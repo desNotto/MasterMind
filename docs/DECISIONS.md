@@ -209,7 +209,7 @@ The user asked to skip the mockup step for this change set and to go straight to
 - **Auto match progress**: a bar along the bottom of the strip and a percentage before the status: finished steps plus the running 4 s measurement, never moving back; green when finished, grey after Stop. The strip is 42 px high (was 36).
 - **Bypass** greys out the window below the top bar and shows "BYPASS: you hear the input" in the footer; the controls stay usable. **The MONITOR ON badge and the red window frame (spec 6.0 rule 3) are removed** at the user's request; B is visible through the player and the B button, band listen through its button.
 
-## D-037 Spectral limiter after Newfangled Elevate (proposed, mockup v16, 2026-11-28)
+## D-037 Spectral limiter after Newfangled Elevate (mockup v16, approved and implemented 2026-11-28)
 
 The user asked to rebuild the per-band ("pinpoint") behaviour of Newfangled Audio Elevate in our Limiter. User decisions (2026-11-28): a linear-phase filter bank (larger latency accepted), the core features first, a mockup before the code.
 
@@ -236,7 +236,7 @@ The user asked to rebuild the per-band ("pinpoint") behaviour of Newfangled Audi
 
 **Tests planned**: perfect reconstruction of the filter bank (bands sum to the delayed input within -100 dB); the ceiling test with every band count; the D-036 THD and IMD tests; a pinpoint test: a 60 Hz kick burst plus a steady 1 kHz tone, the 1 kHz tone is pumped at least 3 dB less with Adaptive Gain 6 dB than with 0 dB; CPU at 26 bands reported.
 
-## D-038 Inflator replaces the Clipper (proposed, mockup v17, 2026-11-28)
+## D-038 Inflator replaces the Clipper (mockup v17, approved and implemented 2026-11-28)
 
 The user asked to replace the Clipper module with an Inflator after the open-source JS Inflator (https://github.com/Kiriki-liszt/JS_Inflator, GPL-3.0, itself a recreation of the Sonnox Inflator curve).
 
@@ -249,3 +249,20 @@ The user asked to replace the Clipper module with an Inflator after the open-sou
 **Other modules**: Output Reach target moves only the Limiter Drive (the Inflator stays as set). Auto match replaces its Clipper step: when the mix is more dynamic than the reference (crest factor), it raises Inflator Effect up to 50 %.
 
 **Licence (open question to the user)**: copying the GPL-3.0 code would make MasterMind GPL-3.0 as a whole. The alternative is our own implementation of the published curve formula with credit in the docs, without copying code.
+
+## D-039 How D-037 and D-038 were built (2026-11-28)
+
+The user approved mockups v16 and v17 and asked to write the code without further mockup confirmations.
+
+**Licence**: the user chose to copy the JS Inflator code, so MasterMind is now distributed under GPL-3.0 (`LICENSE`). The Inflator curve, coefficients, clip stages and band split in `Source/dsp/Inflator.*` follow JS Inflator by yg331 (Copyright (c) 2024, GPL-3.0); the file headers say so. JUCE 8 is used under its AGPLv3 option, which is compatible with GPL-3.0 (section 13).
+
+**Spectral limiter, as built** (differs in detail from the D-037 plan):
+- `SpectralBank`: filter length 4096 at 44.1/48 kHz (8192 at 88.2/96, 16384 above), frames of 256 (512, 1024) samples, uniformly partitioned FFT convolution with 16 partitions. Per frame the effective filter `sum_b g_b H_b` is built in the frequency domain; gains change per frame and are interpolated linearly inside it (the output with the previous and with the new gains is crossfaded), so the output is exactly the gain-weighted band sum. With all gains at one the bands reconstruct the input to about -126 dB (test).
+- Band reductions come from a Hann analysis over the newest half filter length (about 21 ms ahead of the output, every second frame); the attack emphasis comes from the frame spectrum and is delayed to line up. Reductions act only while the input is above the ceiling (pressure, feed-forward), never more than that pressure, and at most Adaptive Gain dB beyond the energy-weighted mean.
+- The broadband D-036 core listens to the band output without emphasis and applies its gain to the band output with emphasis; a 4x oversampled hard clipper at the ceiling and a 1 ms true-peak safety Limiter catch the emphasised attacks. Without emphasis (Transients 0 %) a delay line replaces the clipper and the safety stage (crossfaded when Transients changes), which halves the cost.
+- CPU at 48 kHz on the build machine (20 s benchmark, one core): Classic 3.4 %, 26 bands 6.3 %, 26 bands with Transients 12.2 %.
+- Latency with 26 bands at 48 kHz: 2,735 samples (57 ms). The chain latency is cached per module, and the processor's worker thread does not update the host latency while `prepareToPlay` runs (a race found by the binary null test).
+- Tests: band reconstruction (3 sample rates, 3 band sets), the ceiling test for Classic and 26 bands in every mode plus 26 bands with full emphasis, THD and IMD (below 0.01 %), and the pinpoint test (a steady 1 kHz tone under a 55 Hz kick pumps 7.9 dB with Adaptive Gain 0 and 5.2 dB with 9 dB).
+- The mockup's separate GR and meter column moved into the mode list footer (max GR, true peak, overs), as drawn in v16.
+
+**Inflator, as built**: Effect mixes in the oversampled domain (the dry part passes the same filters), so the module latency equals the old Clipper's and the total latency does not change from the Inflator. Output Reach target: the Inflator takes up to 40 % of each step through Effect (up to 50 %, dB per percent from the measured inflate gain), the Limiter Drive the rest; Undo restores both. Auto match: Effect = 12 x the mean crest-factor excess over the reference, at most 50 %. The tooltip check in the UI harness confirms that every knob on every screen has a tooltip with advice.

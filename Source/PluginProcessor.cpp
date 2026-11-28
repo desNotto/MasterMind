@@ -22,9 +22,12 @@ public:
         while (! threadShouldExit())
         {
             owner.chain.updateLinearPhase();
-            const int latency = owner.chain.latencySamples();
-            if (latency != owner.getLatencySamples())
-                owner.setLatencySamples (latency);
+            if (! owner.preparing.load())
+            {
+                const int latency = owner.chain.latencySamples();
+                if (latency != owner.getLatencySamples())
+                    owner.setLatencySamples (latency);
+            }
             wait (50);
         }
     }
@@ -124,6 +127,7 @@ void MasterMindProcessor::restoreExtraState()
 
 void MasterMindProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
+    preparing = true;
     maxBlock = std::max (1, samplesPerBlock);
     chain.prepare (sampleRate, maxBlock, isNonRealtime());
     loadMeter.prepare (sampleRate);
@@ -139,9 +143,10 @@ void MasterMindProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     });
     inCopy.setSize (2, maxBlock, false, true, false);
     delayedIn.setSize (2, maxBlock, false, true, false);
-    inputDelay.prepare (2, 60000);
+    inputDelay.prepare (2, 120000);
     inputDelay.setDelay (chain.latencySamples());
     setLatencySamples (chain.latencySamples());
+    preparing = false;
 }
 
 void MasterMindProcessor::releaseResources()

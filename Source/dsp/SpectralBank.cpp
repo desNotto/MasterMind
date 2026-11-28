@@ -54,6 +54,7 @@ void SpectralBank::prepare (double sampleRate)
     bins = fftSize / 2 + 1;
     fftBlock = std::make_unique<juce::dsp::FFT> (juce::roundToInt (std::log2 (fftSize)));
     fftLong = std::make_unique<juce::dsp::FFT> (juce::roundToInt (std::log2 (filterLength)));
+    fftAna = std::make_unique<juce::dsp::FFT> (juce::roundToInt (std::log2 (filterLength / 2)));
 
     work.assign ((size_t) 2 * filterLength, 0.0f);
     work2.assign ((size_t) 2 * filterLength, 0.0f);
@@ -165,6 +166,14 @@ void SpectralBank::reset()
     fdlPos = 0;
     framePos = 0;
     cur = 0;
+    frameCount = 0;
+    for (auto& c : builtGains)
+        for (auto& k : c)
+            k.fill (1.0f);
+    for (auto& c : sameAsPrev)
+        c = { true, true };
+    fullEq = { true, true };
+    fullEqPrev = { true, true };
     pressure = 0.0;
     meterBands.store (sets[(size_t) activeSet].bands, std::memory_order_relaxed);
     for (int b = 0; b < maxBands; ++b)
@@ -213,14 +222,12 @@ void SpectralBank::analyse (int ch) noexcept
         const int idx = (histPos[(size_t) ch] - La + i + filterLength) % filterLength;
         analysisBuf[(size_t) i] = h[(size_t) idx] * windowLong[(size_t) (2 * i)];
     }
-    // the long FFT object has size L; use the frame FFT size for the short analysis and a zero-padded
-    // long transform for the long one (the window spans La, padding only interpolates the spectrum)
-    fftLong->performRealOnlyForwardTransform (analysisBuf.data(), true);
+    fftAna->performRealOnlyForwardTransform (analysisBuf.data(), true);
     auto& el = eLong[(size_t) ch];
     std::fill (el.begin(), el.end(), 0.0f);
     for (int k = 0; k <= La / 2; ++k)
     {
-        const float re = analysisBuf[(size_t) (4 * k)], im = analysisBuf[(size_t) (4 * k + 1)]; // every second bin of the L transform
+        const float re = analysisBuf[(size_t) (2 * k)], im = analysisBuf[(size_t) (2 * k + 1)];
         const float p = re * re + im * im;
         const int j = set.lowBandLong[(size_t) k];
         const float w = set.wLong[(size_t) k];
@@ -228,19 +235,19 @@ void SpectralBank::analyse (int ch) noexcept
         if (j + 1 < set.bands)
             el[(size_t) j + 1] += p * (1.0f - w);
     }
-    // short analysis: the newest fftSize samples
-    std::fill (work2.begin(), work2.begin() + 2 * fftSize, 0.0f);
-    for (int i = 0; i < fftSize; ++i)
-    {
-        const int idx = (histPos[(size_t) ch] - fftSize + i + filterLength) % filterLength;
-        work2[(size_t) i] = h[(size_t) idx] * windowShort[(size_t) i];
-    }
-    fftBlock->performRealOnlyForwardTransform (work2.data(), true);
+}
+
+void SpectralBank::analyseShort (int ch) noexcept
+{
+    // short analysis: the spectrum of the newest frame pair, already computed for the convolution
+    const auto& set = sets[(size_t) activeSet];
+    const int spec = fftSize + 2;
+    const float* X = fdl[(size_t) ch].data() + (size_t) (fdlPos * spec);
     auto& es = eShort[(size_t) ch];
     std::fill (es.begin(), es.end(), 0.0f);
     for (int k = 0; k < bins; ++k)
     {
-        const float re = work2[(size_t) (2 * k)], im = work2[(size_t) (2 * k + 1)];
+        const float re = X[2 * k], im = X[2 * k + 1];
         const float p = re * re + im * im;
         const int j = set.lowBandShort[(size_t) k];
         const float w = set.wShort[(size_t) k];
@@ -359,8 +366,11 @@ void SpectralBank::runFrame() noexcept
         std::copy (inFrame[(size_t) ch].begin(), inFrame[(size_t) ch].end(), work2.begin());
         fftBlock->performRealOnlyForwardTransform (work2.data(), true);
         std::copy (work2.begin(), work2.begin() + spec, fdl[(size_t) ch].begin() + (long) (fdlPos * spec));
-        analyse (ch);
+        if (frameCount % 2 == 0)
+            analyse (ch); // the long analysis every second frame (about 11 ms)
+        analyseShort (ch);
     }
+    ++frameCount;
 
     const bool linked = settings.link >= 0.999f;
     std::array<float, maxBands> a {}, s {};
@@ -374,8 +384,42 @@ void SpectralBank::runFrame() noexcept
             s[(size_t) b] = linked ? maxS : settings.link * maxS + (1.0f - settings.link) * eShort[(size_t) ch][(size_t) b];
         }
         computeGains (state[(size_t) ch], a.data(), s.data(), pressure);
-        buildFilter (set, state[(size_t) ch].gShaped.data(), hg[(size_t) ch][0][(size_t) cur].data());
-        buildFilter (set, state[(size_t) ch].gFull.data(), hg[(size_t) ch][1][(size_t) cur].data());
+        // full = shaped when there is no attack emphasis: copy instead of building
+        const auto& gs = state[(size_t) ch].gShaped;
+        const auto& gf = state[(size_t) ch].gFull;
+        bool eq = true;
+        for (int b = 0; b < set.bands && eq; ++b)
+            eq = std::abs (gf[(size_t) b] - gs[(size_t) b]) < 1.0e-6f;
+        fullEqPrev[(size_t) ch] = fullEq[(size_t) ch];
+        fullEq[(size_t) ch] = eq;
+        for (int kind = 0; kind < 2; ++kind)
+        {
+            const auto& g = kind == 0 ? gs : gf;
+            auto& last = builtGains[(size_t) ch][(size_t) kind];
+            bool same = true; // changes below 0.01 dB do not rebuild the filter
+            for (int b = 0; b < set.bands && same; ++b)
+                same = std::abs (g[(size_t) b] - last[(size_t) b]) < 1.2e-3f * last[(size_t) b];
+            auto& dst = hg[(size_t) ch][(size_t) kind][(size_t) cur];
+            const auto& prev = hg[(size_t) ch][(size_t) kind][(size_t) (1 - cur)];
+            if (same && sameAsPrev[(size_t) ch][(size_t) kind])
+            {
+                // both slots already hold this filter; nothing to build
+            }
+            else if (same)
+                std::copy (prev.begin(), prev.end(), dst.begin());
+            else if (kind == 1 && eq)
+            {
+                const auto& shapedNow = hg[(size_t) ch][0][(size_t) cur];
+                std::copy (shapedNow.begin(), shapedNow.end(), dst.begin());
+                last = builtGains[(size_t) ch][0];
+            }
+            else
+            {
+                buildFilter (set, g.data(), dst.data());
+                last = g;
+            }
+            sameAsPrev[(size_t) ch][(size_t) kind] = same;
+        }
     }
 
     float* prevOut = work2.data();
@@ -385,9 +429,20 @@ void SpectralBank::runFrame() noexcept
         const int src = linked ? 0 : ch;
         for (int kind = 0; kind < 2; ++kind)
         {
+            auto& out = kind == 0 ? outShaped[(size_t) ch] : outFull[(size_t) ch];
+            if (kind == 1 && fullEq[(size_t) src] && fullEqPrev[(size_t) src])
+            {
+                // no emphasis: the full output equals the shaped one
+                std::copy (outShaped[(size_t) ch].begin(), outShaped[(size_t) ch].end(), out.begin());
+                continue;
+            }
+            if (sameAsPrev[(size_t) src][(size_t) kind])
+            {
+                convolve (ch, hg[(size_t) src][(size_t) kind][(size_t) cur].data(), out.data());
+                continue;
+            }
             convolve (ch, hg[(size_t) src][(size_t) kind][(size_t) (1 - cur)].data(), prevOut);
             convolve (ch, hg[(size_t) src][(size_t) kind][(size_t) cur].data(), curOut);
-            auto& out = kind == 0 ? outShaped[(size_t) ch] : outFull[(size_t) ch];
             for (int i = 0; i < blockSize; ++i)
             {
                 const float t = (float) (i + 1) / (float) blockSize;

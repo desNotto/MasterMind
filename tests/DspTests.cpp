@@ -754,3 +754,40 @@ TEST_CASE ("Resonance suppressor cuts a sticking-out tone and keeps its latency"
     CHECK (peakPos == 100 + latency);
     CHECK (imp.getSample (0, peakPos) == Catch::Approx (0.5f).margin (0.01f));
 }
+
+TEST_CASE ("Limiter CPU benchmark", "[.bench]")
+{
+    const double fs = 48000.0;
+    const int n = (int) fs * 20;
+    juce::Random random (5);
+    std::vector<float> l ((size_t) n), r ((size_t) n);
+    for (int i = 0; i < n; ++i)
+    {
+        const double t = i / fs, tk = std::fmod (t, 0.5);
+        l[(size_t) i] = (float) (0.8 * std::exp (-tk * 9.0) * std::sin (twoPi * 55.0 * tk) + 0.2 * (random.nextDouble() - 0.5));
+        r[(size_t) i] = l[(size_t) i] * 0.9f;
+    }
+    for (int variant = 0; variant < 3; ++variant)
+    {
+        mm::dsp::Limiter lim;
+        lim.settings.bands = variant == 0 ? 0 : 3;
+        lim.settings.driveDb = 8.0f;
+        lim.settings.transient = variant == 2 ? 0.5f : 0.0f;
+        mm::dsp::Context ctx { fs, 512 };
+        lim.prepare (ctx);
+        auto a = l, b = r;
+        const auto t0 = juce::Time::getMillisecondCounterHiRes();
+        for (int s = 0; s + 512 <= n; s += 512)
+            lim.process (a.data() + s, b.data() + s, 512);
+        const auto ms = juce::Time::getMillisecondCounterHiRes() - t0;
+        std::printf ("variant %d: %.1f ms for 20 s = %.2f %% of real time\n", variant, ms, ms / 200.0);
+    }
+    mm::dsp::SpectralBank bank;
+    bank.prepare (fs);
+    std::vector<float> o1 ((size_t) n), o2 ((size_t) n), o3 ((size_t) n), o4 ((size_t) n);
+    const auto t0 = juce::Time::getMillisecondCounterHiRes();
+    for (int s = 0; s + 512 <= n; s += 512)
+        bank.process (l.data() + s, r.data() + s, o1.data() + s, o2.data() + s, o3.data() + s, o4.data() + s, 512);
+    const auto ms = juce::Time::getMillisecondCounterHiRes() - t0;
+    std::printf ("bank only: %.2f %% of real time\n", ms / 200.0);
+}
