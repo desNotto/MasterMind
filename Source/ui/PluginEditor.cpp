@@ -380,6 +380,7 @@ MasterMindEditor::MasterMindEditor (MasterMindProcessor& p) : AudioProcessorEdit
 
     root = std::make_unique<Root>();
     addAndMakeVisible (*root);
+    root->addMouseListener (this, true); // every click, for closing a value field (D-046)
     topBar = std::make_unique<TopBar> (ctx);
     tabBar = std::make_unique<TabBar> (ctx, *this);
     footer = std::make_unique<Footer> (ctx);
@@ -452,6 +453,18 @@ void MasterMindEditor::selectModule (int index)
 }
 
 void MasterMindEditor::paint (juce::Graphics& g) { g.fillAll (col::bg); }
+
+void MasterMindEditor::mouseDown (const juce::MouseEvent& e)
+{
+    // a value field of a knob (or any text field) closes when the click is outside it: the field
+    // loses the keyboard focus and commits its text, as with Enter
+    auto* focused = juce::Component::getCurrentlyFocusedComponent();
+    if (dynamic_cast<juce::TextEditor*> (focused) == nullptr || e.eventComponent == nullptr)
+        return;
+    if (e.eventComponent == focused || focused->isParentOf (e.eventComponent))
+        return;
+    focused->giveAwayKeyboardFocus();
+}
 
 void MasterMindEditor::paintOverChildren (juce::Graphics& g)
 {

@@ -269,7 +269,7 @@ void SpectralBank::computeGains (GainState& st, const float* el, const float* es
     const double as = std::clamp ((double) settings.adaptSpeed, 0.0, 1.0);
     const double ag = std::clamp ((double) settings.adaptGainDb, 0.0, 24.0);
 
-    std::array<double, maxBands> excess {}, emph {}, soft {}, relMul {}, masked {};
+    std::array<double, maxBands> excess {}, emph {}, soft {}, relMul {}, masked {}, attackDb {};
     double sumE = 0.0, sumEX = 0.0, sumS = 0.0, sumSE = 0.0, sumSS = 0.0;
     const double sf = std::clamp ((double) settings.soften, 0.0, 1.0);
     for (int b = 0; b < nb; ++b)
@@ -281,6 +281,7 @@ void SpectralBank::computeGains (GainState& st, const float* el, const float* es
         fa = (S > fa || fa < -250.0) ? S : S + cFastRel * (fa - S);
         sl = sl < -250.0 ? S : S + cSlow * (sl - S);
         const double attack = std::clamp (fa - sl - 1.0, 0.0, 6.0);
+        attackDb[(size_t) b] = attack;
         emph[(size_t) b] = settings.emphasis * attack;
         soft[(size_t) b] = -sf * attack; // softening: the same detector, the other direction (D-042)
         sumS += es[b];
@@ -326,8 +327,11 @@ void SpectralBank::computeGains (GainState& st, const float* el, const float* es
         for (int b = 0; b < nb; ++b)
         {
             const double dom = maxS > 0.0 ? (double) es[b] / maxS : 0.0;
-            const double weight = std::pow (std::clamp ((dom - 0.1) / 0.9, 0.0, 1.0), 1.0);
-            const double cap = 2.0 * ag * (1.0 + 0.5 * masked[(size_t) b]); // the band limiting may go deeper than the slow offsets
+            // the bands that hit now take the reduction (D-046): a band with an attack (its fast level
+            // over its slow level) or a dominant band; a steady band (a held note) is left alone
+            const double hit = std::clamp (attackDb[(size_t) b] / 3.0, 0.0, 1.0);
+            const double weight = std::max (0.6 * hit, std::clamp ((dom - 0.1) / 0.9, 0.0, 1.0));
+            const double cap = 3.0 * ag * (1.0 + 0.5 * masked[(size_t) b]);
             st.limDelay[(size_t) st.emphPos][(size_t) b] = (float) (std::min (cap, frameNeedDb) * weight);
         }
     }

@@ -252,6 +252,56 @@ juce::AudioBuffer<float> toLoudness (const Processor& proc, const juce::AudioBuf
     return out;
 }
 
+/** Grit (D-046): a steady 1 kHz tone and a distorted guitar chord under hard kicks. The energy around
+    the tone (950-1050 Hz without the tone itself), relative to the tone, shows the modulation and
+    distortion products the limiter adds to sustained notes; measured on the output minus nothing,
+    over the last 6 s, with a long Hann window (0.5 Hz resolution). */
+juce::AudioBuffer<float> gritSignal (double seconds)
+{
+    const int n = (int) (fs * seconds);
+    juce::AudioBuffer<float> b (2, n);
+    for (int i = 0; i < n; ++i)
+    {
+        const double t = (double) i / fs;
+        const double beat = std::fmod (t, 0.25);
+        const double kick = std::exp (-beat * 25.0) * std::sin (twoPi * (48.0 + 120.0 * std::exp (-beat * 40.0)) * beat) * 0.9;
+        double gtr = 0.0;
+        for (double f : { 82.4, 123.5 })
+            gtr += std::tanh (2.5 * std::sin (twoPi * f * t));
+        const double v = 0.45 * kick + 0.08 * gtr + 0.12 * std::sin (twoPi * 1000.0 * t);
+        b.setSample (0, i, (float) v);
+        b.setSample (1, i, (float) v);
+    }
+    return b;
+}
+
+double gritDb (const juce::AudioBuffer<float>& b)
+{
+    const int n = (int) (6.0 * fs), from = b.getNumSamples() - n;
+    const float* x = b.getReadPointer (0) + from;
+    const double tone = goertzel (x, n, 1000.0);
+    double side = 0.0;
+    for (double f = 950.0; f <= 1050.0; f += 0.5)
+        if (std::abs (f - 1000.0) > 3.0)
+            side += std::pow (goertzel (x, n, f), 2.0);
+    // the guitar chord has no partials in 950-1050 Hz (82.4 and 123.5 Hz series: 988.8 Hz is the
+    // 12th partial of 82.4 Hz); the same region of the input is subtracted below
+    return 10.0 * std::log10 (side / (tone * tone) + 1.0e-20);
+}
+
+void gritReport (const char* name, const Processor& proc)
+{
+    const auto in = gritSignal (8.0);
+    const double base = gritDb (in);
+    juce::String line = juce::String (name).paddedRight (' ', 28) + " input " + juce::String (base, 1) + " dB;";
+    for (double g : { 3.0, 6.0, 9.0, 12.0 })
+    {
+        const auto o = proc (in, g);
+        line << "  +" << juce::String ((int) g) << " dB: " << juce::String (gritDb (o), 1) << " (" << juce::String (lufs (o, (int) fs), 1) << " LUFS)";
+    }
+    std::printf ("%s\n", line.toRawUTF8());
+}
+
 void report (const char* name, const Processor& proc, double maxGain)
 {
     const auto mix = metalMix (8.0, true);
@@ -327,6 +377,27 @@ int main (int argc, char** argv)
     {
         const juce::String a (argv[i]);
         extra[a.upToFirstOccurrenceOf ("=", false, false)] = a.fromFirstOccurrenceOf ("=", false, false);
+    }
+    if (mode == "grit")
+    {
+        gritReport ("MM Classic", mastermind ({ { "lim_bands", 0.0f } }));
+        gritReport ("MM 26 Clean", mastermind ({ { "lim_bands", 3.0f } }));
+        gritReport ("MM 26 Loud", mastermind ({ { "lim_bands", 3.0f }, { "lim_mode", 2.0f }, { "lim_adapt_gain", 12.0f }, { "lim_clip", 2.0f }, { "lim_out_clip", 2.0f },
+                                                { "lim_density", 100.0f } }));
+        gritReport ("Clean + AG 0", mastermind ({ { "lim_bands", 3.0f }, { "lim_adapt_gain", 0.0f } }));
+        gritReport ("Clean + AG 0 Speed 0", mastermind ({ { "lim_bands", 3.0f }, { "lim_adapt_gain", 0.0f }, { "lim_adapt_speed", 0.0f } }));
+        if (argc > 99)
+        {
+        gritReport ("Clean + Out Clip 2", mastermind ({ { "lim_bands", 3.0f }, { "lim_out_clip", 2.0f } }));
+        gritReport ("Clean + Density 100", mastermind ({ { "lim_bands", 3.0f }, { "lim_density", 100.0f } }));
+        gritReport ("Clean + Aggressive", mastermind ({ { "lim_bands", 3.0f }, { "lim_mode", 2.0f } }));
+        gritReport ("Clean + Transparent", mastermind ({ { "lim_bands", 3.0f }, { "lim_mode", 0.0f } }));
+        gritReport ("Clean + AG 12", mastermind ({ { "lim_bands", 3.0f }, { "lim_adapt_gain", 12.0f } }));
+        gritReport ("Clean + Lookahead 6", mastermind ({ { "lim_bands", 3.0f }, { "lim_lookahead", 6.0f } }));
+        }
+        if (argc > 99)
+            gritReport ("Elevate", other (format, desc, gainName, extra));
+        return 0;
     }
     if (mode == "ours")
     {

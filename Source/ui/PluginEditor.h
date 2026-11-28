@@ -42,6 +42,8 @@ public:
     void paint (juce::Graphics&) override;
     void paintOverChildren (juce::Graphics&) override;
     void resized() override;
+    /** A click anywhere in the window closes an open value field (it commits like Enter). */
+    void mouseDown (const juce::MouseEvent&) override;
 
     /** For the layout test harness. */
     juce::Component& getRoot() noexcept;
