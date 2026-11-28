@@ -2,6 +2,7 @@
 
 #include "dsp/BusComp.h"
 #include "dsp/ClipLimit.h"
+#include "dsp/Inflator.h"
 #include "dsp/DynamicEq.h"
 #include "dsp/InputOutput.h"
 #include "dsp/LowEnd.h"
@@ -34,7 +35,7 @@ public:
         busComp,
         saturation,
         stereo,
-        clipper,
+        inflator, // slot 7: the Inflator replaced the Clipper (D-038)
         limiter,
         output,
         numModules
@@ -64,7 +65,7 @@ public:
     const BusComp& getBusComp() const noexcept { return busModule; }
     const StereoStage& getStereo() const noexcept { return stereoModule; }
     const Saturation& getSaturation() const noexcept { return satModule; }
-    const Clipper& getClipper() const noexcept { return clipModule; }
+    const Inflator& getInflator() const noexcept { return inflModule; }
     const Limiter& getLimiter() const noexcept { return limModule; }
     const InputStage& getInput() const noexcept { return inputModule; }
 
@@ -74,8 +75,8 @@ public:
     std::atomic<uint64_t> preLimiterSampleOvers { 0 }, preLimiterTpOvers { 0 };
     void resetOvers() noexcept { preLimiterSampleOvers = 0; preLimiterTpOvers = 0; }
 
-    /** Clipper peak reduction of the last block and per-sample limiter gain reduction (dB). */
-    float clipperReductionDb() const noexcept { return clipModule.peakReductionDb(); }
+    /** Inflator clip reduction of the last block and per-sample limiter gain reduction (dB). */
+    float clipperReductionDb() const noexcept { return slots[inflator].on ? inflModule.clipReductionDb() : 0.0f; }
     const float* limiterTrace() const noexcept { return slots[limiter].on ? limModule.lastGainReduction() : nullptr; }
 
     /** Settings snapshots read from the parameters (any thread). */
@@ -108,7 +109,7 @@ private:
     BusComp busModule;
     Saturation satModule;
     StereoStage stereoModule;
-    Clipper clipModule;
+    Inflator inflModule;
     Limiter limModule;
     OutputStage outputModule;
 

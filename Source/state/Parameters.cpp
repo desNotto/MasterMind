@@ -178,7 +178,9 @@ std::vector<Spec> build()
     v.push_back (f ("st_guard_thr", "Guard Threshold", -1.0f, 1.0f, 0.0f, Unit::none));
 
     // ---- 4.8 Clipper -----------------------------------------------------------------------
-    v.push_back (b ("clip_on", "Clipper On", false));
+    // the Clipper was replaced by the Inflator (D-038): clip_on is the Inflator switch, the other
+    // clip_* parameters stay so that older projects load, but they no longer act
+    v.push_back (b ("clip_on", "Inflator On", false));
     v.push_back (c ("clip_type", "Clipper Type", choice::clipType, 1));
     v.push_back (f ("clip_thr", "Clipper Threshold", -12.0f, 0.0f, -1.0f, Unit::dBFS));
     v.push_back (f ("clip_shape", "Clipper Shape", 0.0f, 100.0f, 50.0f, Unit::percent));
@@ -218,6 +220,13 @@ std::vector<Spec> build()
         target.automatable = false; // a setting for Reach target, not a sound parameter
         v.push_back (target);
     }
+    // Inflator (mockup v17, D-038)
+    v.push_back (f ("infl_input", "Inflator Input", -6.0f, 12.0f, 0.0f, Unit::dB));
+    v.push_back (f ("infl_effect", "Inflator Effect", 0.0f, 100.0f, 30.0f, Unit::percent, 0.0f, 1.0f));
+    v.push_back (f ("infl_curve", "Inflator Curve", -50.0f, 50.0f, 0.0f, Unit::none, 0.0f, 1.0f));
+    v.push_back (f ("infl_output", "Inflator Output", -12.0f, 0.0f, 0.0f, Unit::dB));
+    v.push_back (b ("infl_clip", "Inflator Clip 0 dB", true));
+    v.push_back (b ("infl_split", "Inflator Band Split", false));
 
     return v;
 }

@@ -228,7 +228,6 @@ void AutoMatchStrip::timerCallback()
             meters.busLevel += bl;
             ++meters.busLevelN;
         }
-        meters.clipPeak = std::max (meters.clipPeak, (double) chain.getClipper().inputPeakDb());
     }
     else
         noSignalFor += 0.1;
@@ -352,7 +351,7 @@ void AutoMatchStrip::measureAndAct()
     {
         if (dynStage == 0)
         {
-            // Multiband, Bus Comp, Saturation and Clipper on with neutral thresholds, then measure the levels
+            // Multiband, Bus Comp, Saturation and Inflator on with neutral settings, then measure the levels
             ctx.setParam ("mb_on", 1.0f);
             ctx.setParam ("mb_xover_type", 0.0f);
             for (int b = 1; b <= 5; ++b)
@@ -363,8 +362,8 @@ void AutoMatchStrip::measureAndAct()
             }
             for (auto [id, v] : { std::pair { "bus_on", 1.0f }, { "bus_model", 0.0f }, { "bus_ratio", 1.0f }, { "bus_att", 10.0f }, { "bus_rel_auto", 1.0f },
                                   { "bus_knee", 0.0f }, { "bus_sc_hpf", 100.0f }, { "bus_mix", 100.0f }, { "bus_thr", 0.0f }, { "bus_makeup_auto", 0.0f },
-                                  { "sat_on", 1.0f }, { "clip_on", 1.0f }, { "clip_type", 1.0f }, { "clip_thr", 0.0f }, { "clip_shape", 50.0f },
-                                  { "clip_mix", 100.0f }, { "clip_lowprot", 1.0f } })
+                                  { "sat_on", 1.0f }, { "clip_on", 1.0f }, { "infl_input", 0.0f }, { "infl_effect", 0.0f }, { "infl_curve", 0.0f },
+                                  { "infl_output", 0.0f }, { "infl_clip", 1.0f }, { "infl_split", 0.0f } })
                 ctx.setParam (id, v);
             // gentle density: low band Tape 2 dB, mid band Tube 1 dB at 50 %, high band clean
             const float sat[3][4] = { { 2.0f, 1.0f, 100.0f, 0.0f }, { 1.0f, 0.0f, 50.0f, 0.0f }, { 0.0f, 0.0f, 100.0f, 0.0f } };
@@ -400,10 +399,13 @@ void AutoMatchStrip::measureAndAct()
             }
             if (meters.busLevelN > 0)
                 ctx.setParam ("bus_thr", (float) juce::jlimit (-40.0, 0.0, avg (meters.busLevel, meters.busLevelN) - 3.0));
-            if (meters.clipPeak > -60.0)
-                ctx.setParam ("clip_thr", (float) juce::jlimit (-6.0, 0.0, meters.clipPeak - 1.5));
+            // Inflator (D-038): density from the mean crest factor above the reference, up to 50 % Effect
+            double excess = 0.0;
+            for (int b = 0; b < 5; ++b)
+                excess += (ours[b] - refs[b]) / 5.0;
+            ctx.setParam ("infl_effect", (float) juce::roundToInt (juce::jlimit (0.0, 50.0, excess * 12.0)));
             dynStage = 2;
-            status = "Dynamics: Multiband, Bus Comp and Clipper thresholds set";
+            status = "Dynamics: Multiband, Bus Comp and Inflator set";
             restartMeasurement();
             return;
         }

@@ -144,7 +144,7 @@ const std::array<ModuleInfo, 10>& moduleList()
 {
     static const std::array<ModuleInfo, 10> list { { { "in", "Input", "in_on" }, { "eq", "Dynamic EQ", "eq_on" }, { "mb", "Multiband", "mb_on" },
                                                      { "le", "Low-End", "lem_on" }, { "bc", "Bus Comp", "bus_on" }, { "sat", "Saturation", "sat_on" },
-                                                     { "st", "Stereo", "st_on" }, { "cl", "Clipper", "clip_on" }, { "li", "Limiter", "lim_on" },
+                                                     { "st", "Stereo", "st_on" }, { "cl", "Inflator", "clip_on" }, { "li", "Limiter", "lim_on" },
                                                      { "out", "Output", "out_on" } } };
     return list;
 }
@@ -192,7 +192,7 @@ public:
         g.setColour (sel ? col::orange : col::line);
         g.drawRoundedRectangle (r, 7.0f, 1.0f);
         const float a = on ? 1.0f : 0.55f;
-        static const char* shortNames[] = { "Input", "Dyn EQ", "Multiband", "Low-End", "Bus Comp", "Saturation", "Stereo", "Clipper", "Limiter", "Output" };
+        static const char* shortNames[] = { "Input", "Dyn EQ", "Multiband", "Low-End", "Bus Comp", "Saturation", "Stereo", "Inflator", "Limiter", "Output" };
         auto in = getLocalBounds().reduced (8, 5);
         g.setColour (col::text.withAlpha (a));
         g.setFont (semibold (13.0f));
@@ -235,7 +235,7 @@ public:
         gr = 0.0f;
         const auto grText = [&] (float db, float range)
         {
-            prefix = idx == 7 ? "Peak" : "GR";
+            prefix = "GR";
             value = fmtMinus (db) + " dB";
             valueAccent = db < -0.05f;
             gr = -db / range;
@@ -298,7 +298,15 @@ public:
                 prefix = "Width";
                 value = juce::String (juce::roundToInt (ctx.param ("st_mid_width"))) + " / " + juce::String (juce::roundToInt (ctx.param ("st_high_width"))) + "%";
                 break;
-            case 7: grText (chain.getClipper().peakReductionDb(), 6.0f); break;
+            case 7:
+            {
+                const float e = ctx.param ("infl_effect");
+                prefix = "Effect";
+                value = juce::String (juce::roundToInt (e)) + "%";
+                valueAccent = e > 0.5f;
+                gr = juce::jlimit (0.0f, 1.0f, chain.getInflator().inflateDb() / 6.0f);
+                break;
+            }
             case 8: grText (chain.getLimiter().gainReductionDb(), 6.0f); break;
             default: prefix = "TP", value = fmtLufs (ctx.out().truePeak); break;
         }
@@ -2025,14 +2033,14 @@ void drawBox (juce::Graphics& g, juce::Rectangle<float> r)
     g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
 }
 
-/** The waveform around the loudest hit of the last 0.3 s: input after Drive and output, threshold
-    lines and the cut parts in red. Refreshed 5 times per second so that it can be read. */
-class ClWave final : public juce::Component
+/** Inflator waveform (mockup v17): 40 ms around the loudest hit of the last 0.3 s, before (after
+    Input) and after the curve and Effect. Refreshed 5 times per second so that it can be read. */
+class IfWave final : public juce::Component
 {
 public:
-    explicit ClWave (Context& c) : ctx (c)
+    explicit IfWave (Context& c) : ctx (c)
     {
-        setTip (*this, "c:cl.wave");
+        setTip (*this, "c:if.wave");
         ringIn.assign ((size_t) ringSize, 0.0f);
         ringOut.assign ((size_t) ringSize, 0.0f);
         tmpIn.assign (16384, 0.0f);
@@ -2040,8 +2048,8 @@ public:
     }
     void pull()
     {
-        auto& clip = const_cast<dsp::Clipper&> (ctx.proc.getChain().getClipper());
-        const int n = clip.readCapture (tmpIn.data(), tmpOut.data(), (int) tmpIn.size());
+        auto& infl = const_cast<dsp::Inflator&> (ctx.proc.getChain().getInflator());
+        const int n = infl.readCapture (tmpIn.data(), tmpOut.data(), (int) tmpIn.size());
         for (int i = 0; i < n; ++i)
         {
             ringIn[(size_t) pos] = tmpIn[(size_t) i];
@@ -2051,11 +2059,10 @@ public:
         if (++frames % 6 == 0)
             freeze();
     }
-    /** Copies a 40 ms window around the loudest input sample of the last 0.3 s (output aligned by the clipper latency). */
     void freeze()
     {
         const double fs = ctx.proc.getSampleRate() > 0 ? ctx.proc.getSampleRate() : 48000.0;
-        const int lat = ctx.proc.getChain().getClipper().latency();
+        const int lat = ctx.proc.getChain().getInflator().latency();
         const int look = std::min (ringSize - 4096, (int) (0.3 * fs)), win = std::min (2048, (int) (0.04 * fs));
         int best = -1;
         float bestV = 0.0f;
@@ -2086,69 +2093,56 @@ public:
     {
         const auto r = getLocalBounds().toFloat();
         drawBox (g, r);
-        const float mid = r.getCentreY() - 6.0f;
-        const float t = std::pow (10.0f, ctx.param ("clip_thr") / 20.0f);
-        float peak = t * 1.15f;
+        const float mid = r.getCentreY() - 8.0f;
+        float peak = 1.05f;
         for (auto v : viewIn)
             peak = std::max (peak, std::abs (v));
-        const float amp = (r.getHeight() / 2.0f - 20.0f) / peak;
+        const float amp = (r.getHeight() / 2.0f - 22.0f) / peak;
         const auto X = [&] (size_t i) { return 8.0f + (float) i / (float) std::max<size_t> (1, viewIn.size() - 1) * (r.getWidth() - 16.0f); };
         const auto Y = [&] (float v) { return mid - v * amp; };
         g.setColour (juce::Colour (0xff232831));
         g.drawHorizontalLine ((int) mid, 0.0f, r.getWidth());
-        const float dash[] = { 5.0f, 4.0f };
-        g.setColour (clRed);
-        g.drawDashedLine (juce::Line<float> (0.0f, Y (t), r.getWidth(), Y (t)), dash, 2, 1.0f);
-        g.drawDashedLine (juce::Line<float> (0.0f, Y (-t), r.getWidth(), Y (-t)), dash, 2, 1.0f);
+        const float dash[] = { 4.0f, 4.0f };
+        g.setColour (juce::Colour (0xff5a2a32));
+        g.drawDashedLine (juce::Line<float> (0.0f, Y (1.0f), r.getWidth(), Y (1.0f)), dash, 2, 1.0f);
+        g.drawDashedLine (juce::Line<float> (0.0f, Y (-1.0f), r.getWidth(), Y (-1.0f)), dash, 2, 1.0f);
         g.setFont (font (10.5f));
         g.setColour (juce::Colour (0xffff8a95));
-        g.drawText ("Thresh " + fmtMinus (ctx.param ("clip_thr")) + " dB", juce::Rectangle<float> (r.getWidth() - 130.0f, Y (t) - 15.0f, 122.0f, 13.0f), juce::Justification::centredRight);
+        g.drawText ("0 dBFS", juce::Rectangle<float> (r.getWidth() - 80.0f, Y (1.0f) - 14.0f, 72.0f, 12.0f), juce::Justification::centredRight);
         if (ctx.param ("clip_on") < 0.5f || viewIn.empty())
         {
             g.setColour (col::text3);
             g.setFont (font (12.5f));
-            g.drawText (ctx.param ("clip_on") < 0.5f ? "Clipper is off" : "Play the song to see the waveform", r, juce::Justification::centred);
+            g.drawText (ctx.param ("clip_on") < 0.5f ? "Inflator is off" : "Play the song to see the waveform", r, juce::Justification::centred);
             return;
         }
-        for (size_t i = 0; i < viewIn.size(); ++i)
-            if (std::abs (viewIn[i]) > t)
-            {
-                g.setColour (clRed.withAlpha (0.55f));
-                g.drawLine (X (i), Y (viewIn[i]), X (i), Y (viewOut[i]), 1.4f);
-            }
         juce::Path pi, po;
         for (size_t i = 0; i < viewIn.size(); ++i)
         {
             i == 0 ? pi.startNewSubPath (X (i), Y (viewIn[i])) : pi.lineTo (X (i), Y (viewIn[i]));
             i == 0 ? po.startNewSubPath (X (i), Y (viewOut[i])) : po.lineTo (X (i), Y (viewOut[i]));
         }
-        g.setColour (juce::Colour (0xff8b93a1).withAlpha (0.85f));
-        g.strokePath (pi, juce::PathStrokeType (1.2f));
         g.setColour (clMag);
-        g.strokePath (po, juce::PathStrokeType (1.8f));
-        // legend and readouts
-        auto lg = juce::Rectangle<float> (8.0f, 6.0f, 238.0f, 20.0f);
-        g.setColour (col::sunk);
-        g.fillRoundedRectangle (lg, 4.0f);
-        g.setColour (col::line);
-        g.drawRoundedRectangle (lg, 4.0f, 1.0f);
+        g.strokePath (po, juce::PathStrokeType (2.2f));
+        g.setColour (juce::Colour (0xffa4acb9));
+        g.strokePath (pi, juce::PathStrokeType (1.0f));
+        // legend and the gain of quiet parts and peaks from the current curve
+        const float legY = r.getBottom() - 15.0f;
         g.setFont (font (10.5f));
-        g.setColour (juce::Colour (0xff8b93a1));
-        g.fillRect (lg.getX() + 8.0f, lg.getCentreY() - 1.5f, 14.0f, 3.0f);
+        g.setColour (juce::Colour (0xffa4acb9));
+        g.fillRect (10.0f, legY + 5.0f, 14.0f, 3.0f);
         g.setColour (col::text2);
-        g.drawText ("in (after Drive)", lg.withTrimmedLeft (26.0f), juce::Justification::centredLeft);
+        g.drawText ("before", juce::Rectangle<float> (28.0f, legY, 50.0f, 13.0f), juce::Justification::centredLeft);
         g.setColour (clMag);
-        g.fillRect (lg.getX() + 110.0f, lg.getCentreY() - 1.5f, 14.0f, 3.0f);
+        g.fillRect (74.0f, legY + 5.0f, 14.0f, 3.0f);
         g.setColour (col::text2);
-        g.drawText ("out", lg.withTrimmedLeft (128.0f), juce::Justification::centredLeft);
-        g.setColour (clRed.withAlpha (0.7f));
-        g.fillRect (lg.getX() + 160.0f, lg.getCentreY() - 4.5f, 3.0f, 9.0f);
-        g.setColour (col::text2);
-        g.drawText ("cut off", lg.withTrimmedLeft (168.0f), juce::Justification::centredLeft);
-        g.setColour (col::text3);
-        g.drawText ("40 ms around the loudest hit", juce::Rectangle<float> (8.0f, r.getBottom() - 16.0f, 220.0f, 14.0f), juce::Justification::centredLeft);
-        g.setColour (juce::Colour (0xffff8a95));
-        g.drawText ("peaks cut by " + fmtMinus (-ctx.proc.getChain().getClipper().peakReductionDb()) + " dB", juce::Rectangle<float> (r.getWidth() - 168.0f, r.getBottom() - 16.0f, 160.0f, 14.0f), juce::Justification::centredRight);
+        g.drawText ("after Inflator", juce::Rectangle<float> (92.0f, legY, 100.0f, 13.0f), juce::Justification::centredLeft);
+        const double cv = ctx.param ("infl_curve"), e = ctx.param ("infl_effect") / 100.0;
+        const bool clipOn = ctx.param ("infl_clip") > 0.5f;
+        const auto gainAt = [&] (double a) { return 20.0 * std::log10 (std::abs (dsp::Inflator::transfer (a, cv, e, clipOn)) / a); };
+        g.setColour (juce::Colour (0xffffb877));
+        g.drawText ("quiet parts " + fmtSigned (gainAt (0.25)) + " dB" + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "peaks " + fmtSigned (gainAt (0.95)) + " dB",
+                    juce::Rectangle<float> (r.getWidth() - 250.0f, legY, 240.0f, 13.0f), juce::Justification::centredRight);
     }
     Context& ctx;
     static constexpr int ringSize = 32768;
@@ -2156,48 +2150,149 @@ public:
     int pos = 0, frames = 0;
 };
 
-/** Transfer curve of a clipper type; `full` adds the threshold, the axes and the Drive. */
-void drawClipCurve (juce::Graphics& g, juce::Rectangle<float> r, int type, float thrLin, float shape, float mix, juce::Colour c, bool full)
-{
-    const float pad = full ? 8.0f : 3.0f, h = r.getWidth() / 2.0f - pad;
-    const auto P = [&] (double x, double y) { return juce::Point<float> (r.getCentreX() + (float) (x / 1.6) * h, r.getCentreY() - (float) (y / 1.6) * h); };
-    const float dash[] = { 3.0f, 3.0f };
-    g.setColour (juce::Colour (0xff3a414d));
-    g.drawDashedLine (juce::Line<float> (P (-1.6, -1.6), P (1.6, 1.6)), dash, 2, 1.0f);
-    if (full)
-    {
-        g.setColour (clRed);
-        g.drawDashedLine (juce::Line<float> (r.getX() + pad, P (0.0, thrLin).y, r.getRight() - pad, P (0.0, thrLin).y), dash, 2, 1.0f);
-        g.setColour (col::text3);
-        g.setFont (font (10.5f));
-        g.drawText ("out", juce::Rectangle<float> (r.getX() + pad + 2, r.getY() + pad, 30, 12), juce::Justification::centredLeft);
-        g.drawText (juce::String ("in ") + juce::String (juce::CharPointer_UTF8 ("\xe2\x86\x92")), juce::Rectangle<float> (r.getX() + pad + 2, r.getBottom() - 16, 40, 12), juce::Justification::centredLeft);
-    }
-    juce::Path p;
-    for (int k = 0; k <= 80; ++k)
-    {
-        const double x = -1.6 + 3.2 * k / 80.0;
-        const double y = mix * dsp::Clipper::clip (type, x, thrLin, shape) + (1.0 - mix) * x;
-        const auto pt = P (x, juce::jlimit (-1.6, 1.6, y));
-        k == 0 ? p.startNewSubPath (pt) : p.lineTo (pt);
-    }
-    g.setColour (c);
-    g.strokePath (p, juce::PathStrokeType (full ? 2.4f : 1.6f));
-}
-
-class ClCurve final : public juce::Component
+/** Inflator transfer curve (mockup v17): grey Curve -50 and +50, orange the current curve, magenta
+    with the current Effect, the white dot at the current input peak. */
+class IfCurve final : public juce::Component
 {
 public:
-    explicit ClCurve (Context& c) : ctx (c) { setTip (*this, "c:cl.curve"); }
+    explicit IfCurve (Context& c) : ctx (c) { setTip (*this, "c:if.graph"); }
+    void paint (juce::Graphics& g) override
+    {
+        const auto box = getLocalBounds().toFloat();
+        drawBox (g, box);
+        const float side = std::min (box.getWidth(), box.getHeight()) - 12.0f;
+        const auto r = box.withSizeKeepingCentre (side, side);
+        const float pad = 16.0f, S = side - pad - 4.0f;
+        const auto P = [&] (double x, double y) { return juce::Point<float> (r.getX() + pad + (float) x * S, r.getY() + 4.0f + (1.0f - (float) std::min (1.02, y)) * S); };
+        g.setColour (juce::Colour (0xff1b1f26));
+        for (double v : { 0.25, 0.5, 0.75 })
+        {
+            g.drawLine (juce::Line<float> (P (v, 0.0), P (v, 1.0)));
+            g.drawLine (juce::Line<float> (P (0.0, v), P (1.0, v)));
+        }
+        const float dash[] = { 4.0f, 4.0f };
+        g.setColour (juce::Colour (0xff5d6573));
+        g.drawDashedLine (juce::Line<float> (P (0.0, 0.0), P (1.0, 1.0)), dash, 2, 1.0f);
+        const double cv = ctx.param ("infl_curve"), e = ctx.param ("infl_effect") / 100.0;
+        const bool clipOn = ctx.param ("infl_clip") > 0.5f;
+        const auto curve = [&] (std::function<double (double)> f, juce::Colour c, float w)
+        {
+            juce::Path p;
+            for (int k = 0; k <= 60; ++k)
+            {
+                const double x = k / 60.0;
+                k == 0 ? p.startNewSubPath (P (x, f (x))) : p.lineTo (P (x, f (x)));
+            }
+            g.setColour (c);
+            g.strokePath (p, juce::PathStrokeType (w));
+        };
+        curve ([] (double x) { return dsp::Inflator::shape (x, -50.0); }, juce::Colour (0xff6f7786).withAlpha (0.55f), 1.0f);
+        curve ([] (double x) { return dsp::Inflator::shape (x, 50.0); }, juce::Colour (0xff6f7786).withAlpha (0.55f), 1.0f);
+        curve ([cv] (double x) { return dsp::Inflator::shape (x, cv); }, col::orange.withAlpha (0.8f), 1.2f);
+        curve ([cv, e, clipOn] (double x) { return dsp::Inflator::transfer (x, cv, e, clipOn); }, clMag, 2.2f);
+        const float pk = ctx.proc.getChain().getInflator().inputPeakDb();
+        if (ctx.param ("clip_on") > 0.5f && pk > -60.0f)
+        {
+            const double lv = std::min (1.0, std::pow (10.0, pk / 20.0));
+            const auto d = P (lv, dsp::Inflator::transfer (lv, cv, e, clipOn));
+            g.setColour (juce::Colours::white);
+            g.fillEllipse (d.x - 4.0f, d.y - 4.0f, 8.0f, 8.0f);
+        }
+        g.setFont (font (10.0f));
+        g.setColour (col::text3);
+        g.drawText ("out", juce::Rectangle<float> (r.getX() + 2.0f, r.getY() + 4.0f, 30.0f, 12.0f), juce::Justification::centredLeft);
+        g.drawText (juce::String ("in ") + juce::String (juce::CharPointer_UTF8 ("\xe2\x86\x92")), juce::Rectangle<float> (r.getX() + pad, r.getBottom() - 14.0f, 40.0f, 12.0f), juce::Justification::centredLeft);
+        g.setColour (col::text2);
+        g.drawText ("Curve " + juce::String (cv > 0.5 ? "+" : "") + juce::String (juce::roundToInt (cv)), juce::Rectangle<float> (r.getRight() - 104.0f, P (0.0, 0.2).y, 100.0f, 12.0f), juce::Justification::centredRight);
+        g.setColour (clMag);
+        g.drawText ("with Effect " + juce::String (juce::roundToInt (e * 100.0)) + "%", juce::Rectangle<float> (r.getRight() - 124.0f, P (0.0, 0.1).y, 120.0f, 12.0f), juce::Justification::centredRight);
+    }
+    Context& ctx;
+};
+
+/** Odd harmonics the Inflator adds to a sine at the current input peak, and the inflate meter. */
+class IfHarm final : public juce::Component
+{
+public:
+    explicit IfHarm (Context& c) : ctx (c) { setTip (*this, "c:if.harm"); }
+    void refresh()
+    {
+        const double cv = ctx.param ("infl_curve"), e = ctx.param ("infl_effect") / 100.0;
+        const bool clipOn = ctx.param ("infl_clip") > 0.5f;
+        const float pk = ctx.proc.getChain().getInflator().inputPeakDb();
+        const double a = pk > -60.0f ? std::min (1.0, std::pow (10.0, pk / 20.0)) : 0.8;
+        constexpr int N = 512;
+        const auto amp = [&] (int h)
+        {
+            double re = 0.0, im = 0.0;
+            for (int n = 0; n < N; ++n)
+            {
+                const double ph = juce::MathConstants<double>::twoPi * n / N;
+                const double y = dsp::Inflator::transfer (a * std::sin (ph), cv, e, clipOn);
+                re += y * std::cos (h * ph);
+                im += y * std::sin (h * ph);
+            }
+            return 2.0 * std::hypot (re, im) / N;
+        };
+        const double f1 = std::max (1.0e-9, amp (1));
+        for (int k = 0; k < 4; ++k)
+            harmDb[(size_t) k] = (float) (20.0 * std::log10 (std::max (1.0e-9, amp (3 + 2 * k)) / f1));
+        repaint();
+    }
     void paint (juce::Graphics& g) override
     {
         const auto r = getLocalBounds().toFloat();
         drawBox (g, r);
-        const float t = std::pow (10.0f, ctx.param ("clip_thr") / 20.0f);
-        drawClipCurve (g, r.withSizeKeepingCentre (std::min (r.getWidth(), r.getHeight()), std::min (r.getWidth(), r.getHeight())), juce::roundToInt (ctx.param ("clip_type")), t,
-                       ctx.param ("clip_shape") / 100.0f, ctx.param ("clip_mix") / 100.0f, clMag, true);
+        g.setFont (font (11.0f));
+        g.setColour (col::text3);
+        g.drawText ("added harmonics, dB" + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "loudness", r.withHeight (20.0f).reduced (8.0f, 0.0f).translated (0.0f, 3.0f), juce::Justification::centredLeft, true);
+        const float barH = r.getHeight() - 62.0f, top = 28.0f;
+        const float colW = (r.getWidth() - 16.0f) / 5.0f;
+        static const char* names[] = { "3rd", "5th", "7th", "9th" };
+        for (int k = 0; k < 5; ++k)
+        {
+            const float cx = r.getX() + 8.0f + colW * (k + 0.5f);
+            const auto bar = juce::Rectangle<float> (cx - 8.0f, top, 16.0f, barH);
+            g.setColour (col::sunk.darker (0.3f));
+            g.fillRoundedRectangle (bar, 3.0f);
+            g.setColour (col::line);
+            g.drawRoundedRectangle (bar, 3.0f, 1.0f);
+            float frac;
+            juce::Colour c;
+            juce::String val, name;
+            if (k < 4)
+            {
+                const float db = harmDb[(size_t) k];
+                frac = juce::jlimit (0.02f, 1.0f, (db + 80.0f) / 70.0f);
+                c = db > -30.0f ? col::warn : col::info;
+                val = juce::String (juce::roundToInt (db));
+                name = names[k];
+            }
+            else
+            {
+                const float inf = ctx.param ("clip_on") > 0.5f ? ctx.proc.getChain().getInflator().inflateDb() : 0.0f;
+                frac = juce::jlimit (0.02f, 1.0f, inf / 6.0f);
+                c = col::ok;
+                val = fmtSigned (inf);
+                name = "Inflate";
+            }
+            g.setColour (c);
+            g.fillRoundedRectangle (bar.withTop (bar.getBottom() - bar.getHeight() * frac), 3.0f);
+            g.setColour (k < 4 ? col::text2 : col::ok);
+            g.setFont (font (11.5f, true));
+            g.drawText (val, juce::Rectangle<float> (cx - 30.0f, bar.getBottom() + 3.0f, 60.0f, 14.0f), juce::Justification::centred);
+            g.setColour (col::text3);
+            g.setFont (font (11.0f));
+            g.drawText (name, juce::Rectangle<float> (cx - 30.0f, bar.getBottom() + 17.0f, 60.0f, 13.0f), juce::Justification::centred);
+            if (k == 3)
+            {
+                g.setColour (col::line);
+                g.drawVerticalLine (juce::roundToInt (cx + colW * 0.5f), top, top + barH);
+            }
+        }
     }
     Context& ctx;
+    std::array<float, 4> harmDb { -100.0f, -100.0f, -100.0f, -100.0f };
 };
 
 /** Modes with pictures (clip_type or lim_mode): click selects. */
@@ -2261,44 +2356,40 @@ public:
     std::function<void (juce::Graphics&, juce::Rectangle<float>, int)> drawThumb;
 };
 
-class ClipperEditor final : public ModuleEditor
+class InflatorEditor final : public ModuleEditor
 {
 public:
-    explicit ClipperEditor (Context& c)
-        : ModuleEditor (c, 7, "shaves drum peaks before the limiter, Drive pushes the signal into the clipper"), wave (c), curve (c),
-          modes (c, "clip_type", { "Hard", "Soft", "Soft knee", "Diode" }, { "straight cut, loudest", "round, warm", "round only near the top", "asymmetric, gritty" }, "c:cl.mode",
-                 [this] (juce::Graphics& g, juce::Rectangle<float> r, int i) { drawClipCurve (g, r, i, 0.8f, ctx.param ("clip_shape") / 100.0f, 1.0f, clMag, false); })
+    explicit InflatorEditor (Context& c)
+        : ModuleEditor (c, 7, "raises the quiet parts of the wave more than the peaks, denser and louder before the limiter"), wave (c), curve (c), harm (c)
     {
-        auto& peak = own (std::make_unique<Painter>());
-        peak.setInterceptsMouseClicks (false, false);
-        peak.draw = [this] (juce::Graphics& g, juce::Rectangle<int> r)
+        auto& meter = own (std::make_unique<Painter>());
+        meter.setInterceptsMouseClicks (false, false);
+        meter.draw = [this] (juce::Graphics& g, juce::Rectangle<int> r)
         {
-            const auto v = fmtMinus (ctx.proc.getChain().getClipper().peakReductionDb()) + " dB";
+            const float inf = ctx.param ("clip_on") > 0.5f ? ctx.proc.getChain().getInflator().inflateDb() : 0.0f;
+            const auto v = fmtSigned (inf) + " dB";
             const int vw = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font (12.5f, true), v)) + 4;
-            g.setColour (col::orange);
+            g.setColour (col::ok);
             g.setFont (font (12.5f, true));
             g.drawText (v, r.removeFromRight (vw), juce::Justification::centredRight);
             g.setColour (col::text3);
             g.setFont (font (12.5f));
-            g.drawText ("Peak", r, juce::Justification::centredRight);
+            g.drawText ("Inflate", r, juce::Justification::centredRight);
         };
-        readout = &peak;
-        addRight (peak, 100);
-        lowProt.attach (ctx.apvts, "clip_lowprot");
-        setTip (lowProt, "c:cl.lowprot");
-        addRight (lowProt, 92);
-        for (auto* comp : { (juce::Component*) &wave, (juce::Component*) &curve, (juce::Component*) &modes })
+        readout = &meter;
+        addRight (meter, 110);
+        split.attach (ctx.apvts, "infl_split");
+        setTip (split, "c:if.split");
+        addRight (split, 92);
+        clip.attach (ctx.apvts, "infl_clip");
+        setTip (clip, "c:if.clip");
+        addRight (clip, 84);
+        for (auto* comp : { (juce::Component*) &wave, (juce::Component*) &curve, (juce::Component*) &harm })
             addAndMakeVisible (*comp);
-        auto& drive = makeKnob (*this, "clip_drive", "Drive", "cl.drive", clMag);
-        auto& thr = makeKnob (*this, "clip_thr", "Thresh", "cl.thr", clMag);
-        thr.meterLevel = [this]
-        {
-            if (ctx.param ("clip_on") < 0.5f)
-                return noSignal();
-            const float v = ctx.proc.getChain().getClipper().inputPeakDb();
-            return v <= -99.0f ? noSignal() : v;
-        };
-        row = { &drive, &thr, &makeKnob (*this, "clip_shape", "Shape", "cl.shape", clMag), &makeKnob (*this, "clip_mix", "Mix", "cl.mix", clMag) };
+        auto& curveKnob = makeKnob (*this, "infl_curve", "Curve", "if.curve", clMag, true);
+        curveKnob.formatter = [] (float v) { const int c = juce::roundToInt (v); return (c > 0 ? "+" : "") + juce::String (c); };
+        row = { &makeKnob (*this, "infl_input", "Input", "if.input", clMag), &makeKnob (*this, "infl_effect", "Effect", "if.effect", clMag),
+                &curveKnob, &makeKnob (*this, "infl_output", "Output", "if.output", clMag) };
     }
     int naturalHeight (int) const override { return compact ? headH + 8 + 120 + 8 + knobH + 8 : headH + 8 + 176 + 8 + knobH + 8; }
     void update() override
@@ -2306,17 +2397,21 @@ public:
         ModuleEditor::update();
         wave.pull();
         curve.repaint();
-        modes.repaint();
+        if (++frames % 6 == 0)
+            harm.refresh();
+        else
+            harm.repaint();
         readout->repaint();
+        repaint (hint);
     }
     void layoutBody (juce::Rectangle<int> r) override
     {
         auto top = r.removeFromTop (compact ? 120 : 176);
         curve.setVisible (! compact);
-        modes.setVisible (! compact);
+        harm.setVisible (! compact);
         if (! compact)
         {
-            modes.setBounds (top.removeFromRight (206));
+            harm.setBounds (top.removeFromRight (230));
             top.removeFromRight (10);
             curve.setBounds (top.removeFromRight (176));
             top.removeFromRight (10);
@@ -2324,27 +2419,27 @@ public:
         wave.setBounds (top);
         r.removeFromTop (8);
         auto kr = r.removeFromTop (knobH);
-        hint = kr.withTrimmedLeft (layoutKnobRow (kr, row) + 14).withWidth (320);
+        hint = kr.withTrimmedLeft (layoutKnobRow (kr, row) + 14).withWidth (440);
     }
     void paint (juce::Graphics& g) override
     {
         ModuleEditor::paint (g);
-        if (compact || hint.isEmpty())
+        if (compact || hint.isEmpty() || ctx.param ("infl_split") < 0.5f)
             return;
-        const float d = ctx.param ("clip_drive"), t = ctx.param ("clip_thr");
         g.setColour (col::text3);
         g.setFont (font (12.0f));
-        g.drawFittedText ("Drive raises the level before the clipper. With Thresh it sets how much is cut: Drive " + fmtSigned (d) + " dB at " + fmtMinus (t)
-                              + " dB cuts up to " + juce::String (d - t, 1) + " dB of the peaks.",
-                          hint, juce::Justification::centredLeft, 3);
+        g.drawFittedText (juce::String ("Band split: below 240 Hz") + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "240 Hz to 2.4 kHz"
+                              + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "above 2.4 kHz, each band through the curve",
+                          hint, juce::Justification::centredLeft, 2);
     }
-    ClWave wave;
-    ClCurve curve;
-    ModeList modes;
-    Btn lowProt { "Low protect", true };
+    IfWave wave;
+    IfCurve curve;
+    IfHarm harm;
+    Btn clip { "Clip 0 dB", true }, split { "Band split", true };
     Painter* readout = nullptr;
     std::vector<Knob*> row;
     juce::Rectangle<int> hint;
+    int frames = 0;
 };
 
 // ---- Limiter (mockup v15) --------------------------------------------------------------------------------
@@ -2601,7 +2696,7 @@ public:
         reach.accent = true;
         setTip (reach, "c:out.reach");
         reach.onClick = [this] { start(); };
-        stopBtn.onClick = [this] { finish ("Stopped. Undo restores the Clipper and the Limiter.", false); };
+        stopBtn.onClick = [this] { finish ("Stopped. Undo restores the Inflator and the Limiter.", false); };
         undoBtn.onClick = [this] { undo(); };
         row = { &makeKnob (*this, "out_gain", "Gain", "out.gain", col::orange, true) };
         startTimerHz (10);
@@ -2670,7 +2765,7 @@ private:
         g.drawText ("Loudness target", title.removeFromLeft (124), juce::Justification::centredLeft);
         g.setColour (col::text3);
         g.setFont (font (12.5f));
-        g.drawText (tr ("the plugin sets the Clipper and the Limiter to reach it"), title, juce::Justification::centredLeft, true);
+        g.drawText (tr ("the plugin sets the Inflator and the Limiter to reach it"), title, juce::Justification::centredLeft, true);
         const auto local = [&] (juce::Rectangle<int> a) { return a - box->getPosition(); };
         g.drawText ("Target", local (targetLabel), juce::Justification::centredLeft);
         juce::String text = status;
@@ -2689,7 +2784,7 @@ private:
         g.drawText (text, local (statusArea), state == State::idle && status.isEmpty() ? juce::Justification::centredRight : juce::Justification::centredLeft, true);
         g.setColour (col::text3);
         g.setFont (font (12.0f));
-        g.drawFittedText (tr ("The work is split: the Clipper takes up to 3 dB of the peaks, the Limiter the rest. True peak stays at the Ceiling. Louder than about -7 LUFS needs strong clipping: listen to the drums."),
+        g.drawFittedText (tr ("The work is split: the Inflator adds density up to 50% Effect, the Limiter the rest. True peak stays at the Ceiling. Louder than about -7 LUFS: listen to the drums."),
                           local (noteArea), juce::Justification::topLeft, 2);
     }
 
@@ -2703,9 +2798,11 @@ private:
     void start()
     {
         snapshot.clear();
-        for (const auto* id : { "clip_on", "clip_drive", "lim_on", "lim_drive", "lim_ceiling" })
+        for (const auto* id : { "clip_on", "infl_effect", "lim_on", "lim_drive", "lim_ceiling" })
             snapshot[id] = ctx.param (id);
         ctx.monitoring.referenceActive = false;
+        if (ctx.param ("clip_on") < 0.5f)
+            ctx.setParam ("infl_effect", 0.0f); // a switched-off Inflator starts neutral
         ctx.setParam ("clip_on", 1.0f);
         ctx.setParam ("lim_on", 1.0f);
         ctx.setParam ("lim_ceiling", std::min (ctx.param ("lim_ceiling"), -1.0f));
@@ -2721,8 +2818,8 @@ private:
     {
         ctx.engine.requestReset();
         waited = 0.0;
-        clipSum = 0.0;
-        clipN = 0;
+        inflSum = 0.0;
+        inflN = 0;
     }
     void finish (const juce::String& msg, bool ok)
     {
@@ -2740,7 +2837,7 @@ private:
         status.clear();
         showButtons();
         if (ctx.notify)
-            ctx.notify ("The Clipper and the Limiter are back.");
+            ctx.notify ("The Inflator and the Limiter are back.");
     }
     void showButtons()
     {
@@ -2757,8 +2854,8 @@ private:
         {
             waited += 0.1;
             noSignal = 0.0;
-            clipSum += -ctx.proc.getChain().getClipper().peakReductionDb();
-            ++clipN;
+            inflSum += ctx.proc.getChain().getInflator().inflateDb();
+            ++inflN;
         }
         else
             noSignal += 0.1;
@@ -2766,7 +2863,7 @@ private:
             return;
         const double targetLufs = ctx.param ("out_target"), measured = ctx.snap.out.integrated;
         const double err = targetLufs - measured;
-        const double clipCut = clipN > 0 ? clipSum / clipN : 0.0;
+        const double inflGain = inflN > 0 ? inflSum / inflN : 0.0;
         const auto clock = [this]
         {
             const int t = juce::roundToInt ((juce::Time::getMillisecondCounterHiRes() - startedAt) / 1000.0);
@@ -2774,8 +2871,9 @@ private:
         };
         if (std::abs (err) <= 0.3)
         {
-            finish ("Reached " + fmtMinus (measured) + " LUFS in " + clock() + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "Clipper Drive " + fmtSigned (ctx.param ("clip_drive"))
-                        + " dB (peaks cut " + juce::String (clipCut, 1) + " dB)" + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "Limiter Drive " + fmtSigned (ctx.param ("lim_drive")) + " dB",
+            finish ("Reached " + fmtMinus (measured) + " LUFS in " + clock() + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "Inflator Effect "
+                        + juce::String (juce::roundToInt (ctx.param ("infl_effect"))) + "% (" + fmtSigned (inflGain) + " dB)" + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 "))
+                        + "Limiter Drive " + fmtSigned (ctx.param ("lim_drive")) + " dB",
                     true);
             return;
         }
@@ -2784,17 +2882,21 @@ private:
             finish ("Stopped at " + fmtMinus (measured) + " LUFS: the target cannot be reached with these settings.", false);
             return;
         }
-        float clipDrive = ctx.param ("clip_drive"), limDrive = ctx.param ("lim_drive");
+        // the Inflator takes up to 40 % of each step while its Effect is below 50 %, the Limiter the rest;
+        // dB per Effect percent from the measured inflate gain (closed loop corrects the estimate)
+        float effect = ctx.param ("infl_effect"), limDrive = ctx.param ("lim_drive");
+        const double perPct = effect > 5.0f && inflGain > 0.05 ? inflGain / effect : 0.04;
         const float step = (float) err * 0.9f;
         if (step > 0.0f)
         {
-            // the Clipper takes its share while it cuts less than 3 dB, the Limiter the rest
-            const float clipShare = clipCut < 3.0 ? std::min (step * 0.4f, (float) (3.0 - clipCut)) : 0.0f;
-            clipDrive = juce::jlimit (0.0f, 24.0f, clipDrive + clipShare);
-            limDrive = juce::jlimit (0.0f, 24.0f, limDrive + step - clipShare);
-            if (limDrive >= 23.9f && clipDrive >= 23.9f)
+            const float room = std::max (0.0f, 50.0f - effect);
+            const float addPct = std::min (room, (float) (step * 0.4 / perPct));
+            const float inflShare = (float) (addPct * perPct);
+            effect += addPct;
+            limDrive = juce::jlimit (0.0f, 24.0f, limDrive + step - inflShare);
+            if (limDrive >= 23.9f && effect >= 49.9f)
             {
-                finish ("Stopped at " + fmtMinus (measured) + " LUFS: both Drives are at maximum.", false);
+                finish ("Stopped at " + fmtMinus (measured) + " LUFS: Limiter Drive and Inflator Effect are at their maximum.", false);
                 return;
             }
         }
@@ -2802,12 +2904,12 @@ private:
         {
             const float fromLim = std::max (step, -limDrive);
             limDrive += fromLim;
-            clipDrive = juce::jlimit (0.0f, 24.0f, clipDrive + (step - fromLim));
+            effect = juce::jlimit (0.0f, 100.0f, effect + (float) ((step - fromLim) / perPct));
         }
-        ctx.setParam ("clip_drive", std::round (clipDrive * 10.0f) / 10.0f);
+        ctx.setParam ("infl_effect", (float) juce::roundToInt (effect));
         ctx.setParam ("lim_drive", std::round (limDrive * 10.0f) / 10.0f);
         status = "Now " + fmtMinus (measured) + " LUFS " + juce::String (juce::CharPointer_UTF8 ("\xe2\x86\x92")) + " target " + fmtMinus (targetLufs) + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 "))
-               + "Clipper Drive " + fmtSigned (ctx.param ("clip_drive")) + " dB" + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "Limiter Drive " + fmtSigned (ctx.param ("lim_drive")) + " dB";
+               + "Inflator Effect " + juce::String (juce::roundToInt (ctx.param ("infl_effect"))) + "%" + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "Limiter Drive " + fmtSigned (ctx.param ("lim_drive")) + " dB";
         restart();
     }
 
@@ -2824,8 +2926,8 @@ private:
     bool reached = false;
     juce::String status;
     std::map<juce::String, float> snapshot;
-    double waited = 0.0, noSignal = 0.0, startedAt = 0.0, clipSum = 0.0;
-    int clipN = 0, attempts = 0;
+    double waited = 0.0, noSignal = 0.0, startedAt = 0.0, inflSum = 0.0;
+    int inflN = 0, attempts = 0;
 };
 
 // ---- Stereo (mockup v12) ---------------------------------------------------------------------------------
@@ -3131,7 +3233,7 @@ std::unique_ptr<ModuleEditor> createModuleEditor (Context& ctx, int index)
         case 5: return std::make_unique<SaturationEditor> (ctx);
         case 3: return std::make_unique<LowEndEditor> (ctx);
         case 6: return std::make_unique<StereoEditor> (ctx);
-        case 7: return std::make_unique<ClipperEditor> (ctx);
+        case 7: return std::make_unique<InflatorEditor> (ctx);
         case 8: return std::make_unique<LimiterEditor> (ctx);
         case 9: return std::make_unique<OutputEditor> (ctx);
         default: break;

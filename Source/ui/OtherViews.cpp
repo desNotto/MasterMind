@@ -335,7 +335,7 @@ void SpectrogramView::paint (juce::Graphics& g)
             auto row = r.removeFromTop ((r.getHeight()) / (2 - which));
             g.setColour (col::text);
             g.setFont (semibold (12.5f));
-            g.drawText ((which == 0 ? "Clipper" : "Limiter") + juce::String (":  > 3 dB ") + juce::String (a3, 1) + "%,  > 6 dB " + juce::String (a6, 1) + "%",
+            g.drawText ((which == 0 ? "Inflator clip" : "Limiter") + juce::String (":  > 3 dB ") + juce::String (a3, 1) + "%,  > 6 dB " + juce::String (a6, 1) + "%",
                         row.removeFromTop (16), juce::Justification::left);
             auto hr = row.toFloat().reduced (0, 3);
             uint64_t mx = 1;

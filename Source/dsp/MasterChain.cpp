@@ -38,7 +38,7 @@ struct ParamPtrsImpl
     struct SatBand { A drive, type, bias, mix, out, solo, mute; };
     std::array<SatBand, 3> satb {};
     A stSplit, stMid, stHigh, stBal, stGuard, stGuardThr;
-    A clipType, clipThr, clipShape, clipMix, clipLow, clipDrive;
+    A inflInput, inflEffect, inflCurve, inflOutput, inflClip, inflSplit;
     A limLook, limRel, limRelAuto, limMode, limDrive, limCeil, limLink, limTrans;
     A outGain, outDither, outBits;
 };
@@ -141,12 +141,12 @@ ParamPtrsImpl resolve (const params::Raw& r)
     p.stBal = r.get ("st_ms_balance");
     p.stGuard = r.get ("st_guard_on");
     p.stGuardThr = r.get ("st_guard_thr");
-    p.clipType = r.get ("clip_type");
-    p.clipThr = r.get ("clip_thr");
-    p.clipShape = r.get ("clip_shape");
-    p.clipMix = r.get ("clip_mix");
-    p.clipLow = r.get ("clip_lowprot");
-    p.clipDrive = r.get ("clip_drive");
+    p.inflInput = r.get ("infl_input");
+    p.inflEffect = r.get ("infl_effect");
+    p.inflCurve = r.get ("infl_curve");
+    p.inflOutput = r.get ("infl_output");
+    p.inflClip = r.get ("infl_clip");
+    p.inflSplit = r.get ("infl_split");
     p.limLook = r.get ("lim_lookahead");
     p.limRel = r.get ("lim_rel");
     p.limRelAuto = r.get ("lim_rel_auto");
@@ -244,7 +244,7 @@ struct MasterChain::ParamPtrs : ParamPtrsImpl
 MasterChain::MasterChain (juce::AudioProcessorValueTreeState& state) : apvts (state), raw (state)
 {
     Module* mods[numModules] = { &inputModule, &eqModule, &mbModule, &lowEndModule, &busModule,
-                                 &satModule, &stereoModule, &clipModule, &limModule, &outputModule };
+                                 &satModule, &stereoModule, &inflModule, &limModule, &outputModule };
     const char* onIds[numModules] = { "in_on", "eq_on", "mb_on", "lem_on", "bus_on",
                                       "sat_on", "st_on", "clip_on", "lim_on", "out_on" };
     for (int i = 0; i < numModules; ++i)
@@ -339,13 +339,13 @@ void MasterChain::readSettings() noexcept
     st.guardOn = bv (q.stGuard);
     st.guardThreshold = v (q.stGuardThr);
 
-    auto& cl = clipModule.settings;
-    cl.type = iv (q.clipType);
-    cl.thresholdDb = v (q.clipThr);
-    cl.shape = v (q.clipShape) * 0.01f;
-    cl.mix = v (q.clipMix) * 0.01f;
-    cl.lowProtect = bv (q.clipLow);
-    cl.driveDb = v (q.clipDrive);
+    auto& inf = inflModule.settings;
+    inf.inputDb = v (q.inflInput);
+    inf.effect = v (q.inflEffect) * 0.01f;
+    inf.curve = v (q.inflCurve);
+    inf.outputDb = v (q.inflOutput);
+    inf.clip = bv (q.inflClip);
+    inf.split = bv (q.inflSplit);
 
     auto& li = limModule.settings;
     li.lookaheadMs = v (q.limLook);
@@ -365,7 +365,7 @@ void MasterChain::readSettings() noexcept
     const int quality = iv (q.quality);
     const bool high = quality == 2 || (quality == 0 && offlineMode);
     satModule.setHighQuality (high);
-    clipModule.setHighQuality (high);
+    inflModule.setHighQuality (high);
 }
 
 void MasterChain::prepare (double sampleRate, int maxBlockSize, bool offline)

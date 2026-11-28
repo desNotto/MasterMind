@@ -493,6 +493,65 @@ TEST_CASE ("Limiter recovers from a single short peak without a long hole", "[ds
     }
 }
 
+TEST_CASE ("Inflator curve keeps 0 and full scale and rises in between", "[dsp][inflator]")
+{
+    for (double curve : { -50.0, -25.0, 0.0, 25.0, 50.0 })
+    {
+        CHECK (mm::dsp::Inflator::shape (0.0, curve) == Approx (0.0).margin (1e-12));
+        CHECK (mm::dsp::Inflator::shape (1.0, curve) == Approx (1.0).margin (1e-12));
+        CHECK (mm::dsp::Inflator::shape (-1.0, curve) == Approx (-1.0).margin (1e-12));
+        double last = 0.0;
+        for (int k = 1; k <= 100; ++k)
+        {
+            const double x = k / 100.0, y = mm::dsp::Inflator::shape (x, curve);
+            CHECK (y >= x - 1e-12); // quiet parts never get quieter
+            CHECK (y >= last - 1e-12); // monotonic
+            last = y;
+        }
+    }
+    // the JS Inflator values at Curve 0: 0.5 -> 0.6875 - 0.0625 * (0.25 - 0.25 + 0.0625)
+    CHECK (mm::dsp::Inflator::shape (0.5, 0.0) == Approx (0.75 - 0.0625 - 0.0625 * 0.0625).margin (1e-12));
+}
+
+TEST_CASE ("Inflator with Effect 0 is a pure delay and adds loudness with Effect", "[dsp][inflator]")
+{
+    const double fs = 48000.0;
+    const int n = 48000;
+    juce::AudioBuffer<float> in (2, n);
+    for (int i = 0; i < n; ++i)
+    {
+        // tones only: the oversampling filters have a fractional delay that broadband noise would show
+        const float v = (float) (0.25 * std::sin (twoPi * 110.0 * i / fs) + 0.1 * std::sin (twoPi * 330.0 * i / fs + 0.4));
+        in.setSample (0, i, v);
+        in.setSample (1, i, v * 0.8f);
+    }
+    double rmsByEffect[2] = {};
+    for (int k = 0; k < 2; ++k)
+    {
+        Host h;
+        h.set ("clip_on", 1.0f);
+        h.set ("infl_effect", k == 0 ? 0.0f : 100.0f);
+        h.set ("infl_clip", 0.0f);
+        h.chain.prepare (fs, 512, false);
+        const int latency = h.chain.latencySamples();
+        juce::AudioBuffer<float> b;
+        b.makeCopyOf (in);
+        mmtest::runChain (h, b, 512);
+        double sum = 0.0, err = 0.0;
+        for (int i = n / 2; i < n; ++i)
+        {
+            sum += (double) b.getSample (0, i) * b.getSample (0, i);
+            err = std::max (err, (double) std::abs (b.getSample (0, i) - in.getSample (0, i - latency)));
+        }
+        rmsByEffect[k] = std::sqrt (sum / (n / 2));
+        if (k == 0)
+            CHECK (err < 6.0e-3); // only the oversampling filters remain (sub-sample delay)
+    }
+    const double gainDb = 20.0 * std::log10 (rmsByEffect[1] / rmsByEffect[0]);
+    INFO ("Inflator gain at Effect 100 %: " << gainDb << " dB");
+    CHECK (gainDb > 1.0);
+}
+
 TEST_CASE ("Automating every continuous parameter causes no clicks", "[dsp][automation]")
 {
     const double fs = 48000.0;

@@ -1462,14 +1462,14 @@ function outEditor() {
   const ks = [knob(.5, 'Gain', '0.0 dB', { id: 'out.gain', bi: 1 })].join('');
   const right = '<span class="dd" data-t="out.dither">Dither: Off<span class="car">▾</span></span><span class="dd">24 bit<span class="car">▾</span></span><span class="dd">Quality: Auto<span class="car">▾</span></span>';
   const steps = OUTRUN === 'run'
-    ? '<span class="mini" style="color:var(--text2)">Now <b style="color:#fff">−9.6 LUFS</b> → target −8.0 · Limiter Drive +5.5 dB · measuring…</span><span class="btn">Stop</span>'
+    ? '<span class="mini" style="color:var(--text2)">Now <b style="color:#fff">−9.6 LUFS</b> → target −8.0 · Inflator Effect 30% · Limiter Drive +4.5 dB · measuring…</span><span class="btn">Stop</span>'
     : OUTRUN === 'done'
-    ? '<span class="mini" style="color:var(--ok)">Reached −8.1 LUFS in 0:24 · Limiter Drive +7.5 dB (GR 3.6 dB) · Inflator unchanged</span><span class="btn">Undo</span>'
+    ? '<span class="mini" style="color:var(--ok)">Reached −8.1 LUFS in 0:24 · Inflator Effect 35% (+1.6 dB) · Limiter Drive +6.0 dB</span><span class="btn">Undo</span>'
     : '<span class="mini">Play the song, then press:</span><span class="btn go" data-t="out.reach">Reach target</span>';
-  const target = `<div class="sect" style="flex:none"><div class="st">Loudness target<span class="mini" style="font-weight:500">the plugin sets the Limiter Drive to reach it</span></div>
+  const target = `<div class="sect" style="flex:none"><div class="st">Loudness target<span class="mini" style="font-weight:500">the plugin sets the Inflator and the Limiter to reach it</span></div>
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span class="mini">Target</span><span class="fld" data-t="out.target" style="min-width:92px">−8.0 LUFS</span>
     <span class="seg" data-t="out.presets"><span>−14</span><span>−11</span><span>−9</span><span class="on">−8</span><span>−6</span><span>−5</span></span>${steps}</div>
-    <div class="mini" style="line-height:1.45">The Limiter does the work; the Inflator stays as you set it. True peak stays at the Ceiling (−1.0 dBTP). For more density raise Inflator Effect first, then the target.</div></div>`;
+    <div class="mini" style="line-height:1.45">The work is split: the Inflator adds density up to 50% Effect, the Limiter the rest. True peak stays at the Ceiling (−1.0 dBTP). Louder than about −7 LUFS: listen to the drums.</div></div>`;
   return `<div class="panel ed">${edHead('Output', 'final gain, dither and the loudness target', right)}<div class="edb">${target}<div class="krow">${ks}<span class="mini" style="align-self:center;margin-left:10px">Out true peak <b style="color:var(--ok)">−1.1 dBTP</b></span></div></div></div>`;
 }
 
@@ -1727,7 +1727,7 @@ const UITIPS = {
   'cl.curve': ['Кривая', 'вход → выход', 'Кривая показывает, как Clipper меняет уровень: вход по горизонтали, выход по вертикали. Выше порога кривая становится плоской.', TIPH, 'Плавный изгиб звучит мягче. Резкий угол даёт больше громкости, но и больше искажений.', ''],
   'cl.mode': ['Режим', 'Hard, Soft, Soft knee, Diode', 'Список выбирает форму среза. Картинка у каждого режима показывает его кривую.', TIPH, 'Hard — самый громкий и жёсткий. Soft — тёплый. Soft knee — мягкий только у порога. Diode — несимметричный, с «грязью».', 'Клик — выбрать режим'],
   'out.target': ['Целевая громкость', '−30 … −3 LUFS', 'Поле задаёт желаемую интегральную громкость трека. Клик — ввод числа, кнопки рядом — частые значения.', TIPH, 'Для стриминга используйте −14…−9 LUFS. Для громкого металла −8…−6 LUFS. Громче −7 LUFS барабаны теряют удар.', ''],
-  'out.reach': ['Reach target', '', 'Кнопка подстраивает Drive лимитера, пока громкость не станет равна цели. Включите воспроизведение до нажатия.', TIPW, 'Кнопка меняет только Clipper и Limiter. Undo возвращает их. Слушайте барабаны после подстройки.', ''],
+  'out.reach': ['Reach target', '', 'Кнопка подстраивает Effect у Inflator и Drive у лимитера, пока громкость не станет равна цели. Включите воспроизведение до нажатия.', TIPW, 'Кнопка меняет только Inflator и Limiter. Undo возвращает их. Слушайте барабаны после подстройки.', ''],
   'out.presets': ['Частые цели', '', 'Кнопки ставят частые значения цели.', TIPH, '−14 — стриминг, −9 и −8 — современный металл, −6 и −5 — очень громко.', ''],
   'li.time': ['Уровень во времени', 'последние 6 с', 'Серая линия — уровень после Drive. Розовая линия — уровень на выходе. Оранжевая заливка сверху — ослабление (GR). Пунктир — Ceiling.', TIPH, 'Если оранжевая заливка не уходит между ударами, лимитер работает всё время. Уменьшите Drive или включите Auto release.', ''],
   'li.meters': ['Индикаторы', 'GR, true peak, overs', 'Столбики показывают ослабление сейчас и максимум. Ниже — true peak на выходе и число перегрузок.', TIPH, 'Для металла обычно хватает 2–4 dB GR. Больше 6 dB — барабаны становятся плоскими.', ''],
