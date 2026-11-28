@@ -2,9 +2,11 @@
 
 #include "dsp/Module.h"
 #include "dsp/Oversampler.h"
+#include "dsp/SpectralBank.h"
 #include "dsp/TruePeak.h"
 
 #include <array>
+#include <memory>
 #include <vector>
 
 namespace mm::dsp
@@ -61,12 +63,22 @@ public:
         bool releaseAuto = true;
         int mode = 1; // Transparent, Balanced, Aggressive
         float driveDb = 0.0f, ceilingDb = -1.0f, link = 1.0f, transient = 0.0f;
+        int bands = 0;             // 0 Classic, 1: 8, 2: 16, 3: 26 bands (D-037, structural)
+        float adaptGainDb = 6.0f, adaptSpeed = 0.7f, adaptTrans = 0.5f;
     } settings;
 
     void prepare (const Context& ctx) override;
     void reset() override;
     void process (float* left, float* right, int numSamples) noexcept override;
-    int latency() const noexcept override { return lookahead + detector[0].latency(); }
+    int latency() const noexcept override
+    {
+        const int core = lookahead + detector[0].latency();
+        return spectral() ? bank->latency() + core + clip->latency() + safety->latency() : core;
+    }
+
+    /** The spectral band stage (nullptr in Classic or inside the safety stage). */
+    const SpectralBank* spectralBank() const noexcept { return spectral() ? bank.get() : nullptr; }
+    bool spectral() const noexcept { return activeBands > 0 && bank != nullptr; }
 
     float gainReductionDb() const noexcept { return grMeter.get(); }
     /** Peak of the last block in dBFS after Drive (before limiting) and at the output. */
@@ -119,6 +131,17 @@ private:
         bool slow = true;
     };
     double processPipe (Pipe& p, double required, const Coeffs& k) const noexcept;
+
+    void processCore (float* const* det, float* const* app, float* const* out, int numSamples, bool applyDrive) noexcept;
+
+    // spectral mode: band stage, the limiter core, a clipper for the emphasised attacks and a short
+    // true-peak safety stage (a nested Limiter in Classic mode)
+    std::unique_ptr<SpectralBank> bank;
+    std::unique_ptr<Clipper> clip;
+    std::unique_ptr<Limiter> safety;
+    std::array<std::vector<float>, 2> driven, shaped, full;
+    int activeBands = 0;
+    bool nested = false;
 
     double fs = 48000.0;
     int maxBlock = 512, lookahead = 96, maxLookahead = 480, maxHold = 2400, sampleIndex = 0;

@@ -39,7 +39,7 @@ struct ParamPtrsImpl
     std::array<SatBand, 3> satb {};
     A stSplit, stMid, stHigh, stBal, stGuard, stGuardThr;
     A inflInput, inflEffect, inflCurve, inflOutput, inflClip, inflSplit;
-    A limLook, limRel, limRelAuto, limMode, limDrive, limCeil, limLink, limTrans;
+    A limLook, limRel, limRelAuto, limMode, limDrive, limCeil, limLink, limTrans, limBands, limAGain, limASpeed, limATrans;
     A outGain, outDither, outBits;
 };
 
@@ -155,6 +155,10 @@ ParamPtrsImpl resolve (const params::Raw& r)
     p.limCeil = r.get ("lim_ceiling");
     p.limLink = r.get ("lim_link");
     p.limTrans = r.get ("lim_transient");
+    p.limBands = r.get ("lim_bands");
+    p.limAGain = r.get ("lim_adapt_gain");
+    p.limASpeed = r.get ("lim_adapt_speed");
+    p.limATrans = r.get ("lim_adapt_trans");
     p.outGain = r.get ("out_gain");
     p.outDither = r.get ("out_dither");
     p.outBits = r.get ("out_bits");
@@ -356,6 +360,10 @@ void MasterChain::readSettings() noexcept
     li.ceilingDb = v (q.limCeil);
     li.link = v (q.limLink) * 0.01f;
     li.transient = v (q.limTrans) * 0.01f;
+    li.bands = iv (q.limBands);
+    li.adaptGainDb = v (q.limAGain);
+    li.adaptSpeed = v (q.limASpeed) * 0.01f;
+    li.adaptTrans = v (q.limATrans) * 0.01f;
 
     auto& out = outputModule.settings;
     out.gainDb = v (q.outGain);

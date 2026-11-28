@@ -227,6 +227,11 @@ std::vector<Spec> build()
     v.push_back (f ("infl_output", "Inflator Output", -12.0f, 0.0f, 0.0f, Unit::dB));
     v.push_back (b ("infl_clip", "Inflator Clip 0 dB", true));
     v.push_back (b ("infl_split", "Inflator Band Split", false));
+    // spectral Limiter (mockup v16, D-037); the band count changes the latency, so it is not automatable
+    v.push_back (c ("lim_bands", "Limiter Bands", choice::limBands, 3, false));
+    v.push_back (f ("lim_adapt_gain", "Limiter Adaptive Gain", 0.0f, 12.0f, 6.0f, Unit::dB, 0.0f, 0.1f));
+    v.push_back (f ("lim_adapt_speed", "Limiter Adaptive Speed", 0.0f, 100.0f, 70.0f, Unit::percent, 0.0f, 1.0f));
+    v.push_back (f ("lim_adapt_trans", "Limiter Adaptive Transients", 0.0f, 100.0f, 50.0f, Unit::percent, 0.0f, 1.0f));
 
     return v;
 }

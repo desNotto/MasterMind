@@ -347,14 +347,18 @@ TEST_CASE ("Limiter true peak stays at or below the ceiling + 0.05 dB with +24 d
         kick.setSample (1, i, (float) kk);
     }
 
+    // Classic and 26 bands, and 26 bands with full attack emphasis (the clipper and the safety stage)
     for (auto* sig : { &pink, &sweep, &kick })
-        for (int mode : { 0, 1, 2 })
+        for (int variant = 0; variant < 7; ++variant)
         {
+            const int mode = variant % 3, bands = variant < 3 ? 0 : 3;
             Host h;
             h.set ("lim_on", 1.0f);
             h.set ("lim_drive", 24.0f);
             h.set ("lim_ceiling", -1.0f);
             h.set ("lim_mode", (float) mode);
+            h.set ("lim_bands", (float) bands);
+            h.set ("lim_transient", variant == 6 ? 100.0f : 0.0f);
             h.chain.prepare (fs, 512, false);
             juce::AudioBuffer<float> b;
             b.makeCopyOf (*sig);
@@ -365,7 +369,7 @@ TEST_CASE ("Limiter true peak stays at or below the ceiling + 0.05 dB with +24 d
             for (int ch = 0; ch < 2; ++ch)
                 for (int i = 0; i < b.getNumSamples(); ++i)
                     sp = std::max (sp, (double) std::abs (b.getSample (ch, i)));
-            INFO ("signal " << (sig == &pink ? "pink" : sig == &sweep ? "sweep" : "kick") << " mode " << mode
+            INFO ("signal " << (sig == &pink ? "pink" : sig == &sweep ? "sweep" : "kick") << " variant " << variant << " mode " << mode
                             << " true peak " << tp << " at " << where << " sample peak " << 20.0 * std::log10 (sp));
             CHECK (tp <= -1.0 + 0.05);
         }
@@ -491,6 +495,82 @@ TEST_CASE ("Limiter recovers from a single short peak without a long hole", "[ds
         INFO ("mode " << mode << " level after the peak " << 20.0 * std::log10 (after / before) << " dB");
         CHECK (after / before > std::pow (10.0, -1.0 / 20.0));
     }
+}
+
+TEST_CASE ("Spectral limiter bands reconstruct the input exactly", "[dsp][limiter][spectral]")
+{
+    for (double fs : { 44100.0, 48000.0, 96000.0 })
+        for (int set : { 0, 1, 2 })
+        {
+            mm::dsp::SpectralBank bank;
+            bank.settings.bandSet = set;
+            bank.settings.ceiling = 1.0;
+            bank.prepare (fs);
+            const int n = (int) fs;
+            juce::Random random (11);
+            std::vector<float> l ((size_t) n), r ((size_t) n), sl ((size_t) n), sr ((size_t) n), fl ((size_t) n), fr ((size_t) n);
+            for (int i = 0; i < n; ++i)
+            {
+                l[(size_t) i] = 0.2f * (random.nextFloat() * 2.0f - 1.0f);
+                r[(size_t) i] = 0.2f * (random.nextFloat() * 2.0f - 1.0f);
+            }
+            for (int start = 0; start < n; start += 384) // a block size that is not a multiple of the frame
+            {
+                const int m = std::min (384, n - start);
+                bank.process (l.data() + start, r.data() + start, sl.data() + start, sr.data() + start, fl.data() + start, fr.data() + start, m);
+            }
+            const int lat = bank.latency();
+            double err = 0.0;
+            for (int i = lat; i < n; ++i)
+            {
+                err = std::max (err, (double) std::abs (sl[(size_t) i] - l[(size_t) (i - lat)]));
+                err = std::max (err, (double) std::abs (fr[(size_t) i] - r[(size_t) (i - lat)]));
+            }
+            INFO ("fs " << fs << " set " << set << " max error " << err);
+            CHECK (err < 2.0e-5); // -80 dB below the 0.2 signal, float rounding only
+        }
+}
+
+TEST_CASE ("Spectral limiter limits the kick band and pumps a steady tone less", "[dsp][limiter][spectral]")
+{
+    // a kick (55 Hz bursts every 0.5 s) plus a steady 1 kHz tone, 10 dB of drive: the band limiter
+    // should take the kick down in the low bands and leave the tone more stable than a wideband limiter
+    const double fs = 48000.0;
+    const int n = (int) fs * 6;
+    juce::AudioBuffer<float> sig (2, n);
+    for (int i = 0; i < n; ++i)
+    {
+        const double t = i / fs, tk = std::fmod (t, 0.5);
+        const double kick = 0.8 * std::exp (-tk * 9.0) * std::sin (twoPi * 55.0 * tk);
+        const double v = kick + 0.12 * std::sin (twoPi * 1000.0 * t);
+        sig.setSample (0, i, (float) v);
+        sig.setSample (1, i, (float) v);
+    }
+    double pumping[2] = {};
+    for (int k = 0; k < 2; ++k)
+    {
+        Host h;
+        h.set ("lim_on", 1.0f);
+        h.set ("lim_drive", 10.0f);
+        h.set ("lim_ceiling", -1.0f);
+        h.set ("lim_bands", 3.0f);
+        h.set ("lim_adapt_gain", k == 0 ? 0.0f : 9.0f);
+        h.chain.prepare (fs, 512, false);
+        juce::AudioBuffer<float> b;
+        b.makeCopyOf (sig);
+        mmtest::runChain (h, b, 512);
+        // level of the 1 kHz tone in 10 ms windows over the last 3 s: max minus min in dB
+        double lo = 1e9, hi = -1e9;
+        for (int w = 3 * (int) fs; w + 480 < n; w += 480)
+        {
+            const double a = toneAmp (b, fs, 1000.0, w, 480);
+            lo = std::min (lo, a);
+            hi = std::max (hi, a);
+        }
+        pumping[k] = 20.0 * std::log10 (hi / std::max (1e-9, lo));
+    }
+    INFO ("1 kHz pumping: wideband " << pumping[0] << " dB, adaptive " << pumping[1] << " dB");
+    CHECK (pumping[1] < pumping[0] - 2.0);
 }
 
 TEST_CASE ("Inflator curve keeps 0 and full scale and rises in between", "[dsp][inflator]")

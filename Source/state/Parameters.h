@@ -91,6 +91,7 @@ inline const juce::StringArray knee { "Soft", "Hard" };
 inline const juce::StringArray satType { "Tube", "Tape", "Transformer", "Diode" };
 inline const juce::StringArray clipType { "Hard", "Soft", "Soft knee", "Diode" };
 inline const juce::StringArray limMode { "Transparent", "Balanced", "Aggressive" };
+inline const juce::StringArray limBands { "Classic", "8", "16", "26" };
 inline const juce::StringArray dither { "Off", "TPDF", "Noise-shaped" };
 inline const juce::StringArray ditherBits { "16 bit", "24 bit" };
 inline const juce::StringArray quality { "Auto", "Normal", "High" };

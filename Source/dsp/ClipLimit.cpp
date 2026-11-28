@@ -253,11 +253,38 @@ void Limiter::prepare (const Context& ctx)
     for (auto& d : delayBuf)
         d.assign ((size_t) (maxLookahead + TruePeakDetector8::latency() + 2), 0.0f);
     grTrace.assign ((size_t) maxBlock, 0.0f);
+    if (! nested)
+    {
+        bank = std::make_unique<SpectralBank>();
+        bank->prepare (fs);
+        clip = std::make_unique<Clipper>();
+        clip->settings.type = 0; // hard, 4x oversampled: only the emphasised attacks reach it
+        clip->settings.mix = 1.0f;
+        clip->settings.lowProtect = false;
+        clip->settings.driveDb = 0.0f;
+        clip->prepare (ctx);
+        safety = std::make_unique<Limiter>();
+        safety->nested = true;
+        safety->settings.lookaheadMs = 1.0f;
+        safety->settings.mode = 2;
+        safety->prepare (ctx);
+        for (auto* v : { &driven, &shaped, &full })
+            for (auto& c : *v)
+                c.assign ((size_t) maxBlock, 0.0f);
+    }
     reset();
 }
 
 void Limiter::reset()
 {
+    activeBands = nested ? 0 : std::clamp (settings.bands, 0, 3);
+    if (bank != nullptr)
+    {
+        bank->settings.bandSet = std::max (0, activeBands - 1);
+        bank->reset();
+        clip->reset();
+        safety->reset();
+    }
     lookahead = std::clamp ((int) std::lround (settings.lookaheadMs * 0.001 * fs), 1, maxLookahead);
     for (auto& d : detector)
         d.reset();
@@ -274,10 +301,54 @@ void Limiter::reset()
 void Limiter::process (float* left, float* right, int numSamples) noexcept
 {
     const int wantLookahead = std::clamp ((int) std::lround (settings.lookaheadMs * 0.001 * fs), 1, maxLookahead);
-    if (wantLookahead != lookahead)
-        reset(); // structural change (non-automatable parameter); latency is re-reported by the chain
+    const int wantBands = nested ? 0 : std::clamp (settings.bands, 0, 3);
+    if (wantLookahead != lookahead || wantBands != activeBands)
+        reset(); // structural change (non-automatable parameters); latency is re-reported by the chain
 
     drive.setTarget (dbToGain (settings.driveDb), (int) (0.02 * fs));
+    float* io[2] = { left, right };
+    if (! spectral() || numSamples > maxBlock)
+    {
+        processCore (io, io, io, numSamples, true);
+        return;
+    }
+
+    // spectral mode (D-037): Drive -> band stage -> limiter core (listens to the shaped bands, applies
+    // the gain to the bands with the attack emphasis) -> clipper -> true-peak safety stage
+    auto& bs = bank->settings;
+    bs.adaptGainDb = settings.adaptGainDb;
+    bs.adaptSpeed = settings.adaptSpeed;
+    bs.adaptTrans = settings.adaptTrans;
+    bs.emphasis = settings.transient;
+    bs.link = settings.link;
+    bs.mode = settings.mode;
+    bs.ceiling = dbToGain (settings.ceilingDb);
+    float inPk = 0.0f;
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float g = (float) drive.next();
+        driven[0][(size_t) i] = left[i] * g;
+        driven[1][(size_t) i] = right[i] * g;
+        inPk = std::max (inPk, std::max (std::abs (driven[0][(size_t) i]), std::abs (driven[1][(size_t) i])));
+    }
+    bank->process (driven[0].data(), driven[1].data(), shaped[0].data(), shaped[1].data(), full[0].data(), full[1].data(), numSamples);
+    float* det[2] = { shaped[0].data(), shaped[1].data() };
+    float* app[2] = { full[0].data(), full[1].data() };
+    processCore (det, app, io, numSamples, false);
+    clip->settings.thresholdDb = settings.ceilingDb;
+    clip->process (left, right, numSamples);
+    safety->settings.ceilingDb = settings.ceilingDb;
+    safety->settings.link = settings.link;
+    safety->process (left, right, numSamples);
+    float outPk = 0.0f;
+    for (int i = 0; i < numSamples; ++i)
+        outPk = std::max (outPk, std::max (std::abs (left[i]), std::abs (right[i])));
+    inMeter.set ((float) gainToDb (inPk + 1.0e-9));
+    outMeter.set ((float) gainToDb (outPk + 1.0e-9));
+}
+
+void Limiter::processCore (float* const* det, float* const* app, float* const* out, int numSamples, bool applyDrive) noexcept
+{
     // internal target slightly below the ceiling leaves room for the interpolation error
     const double ceiling = dbToGain (settings.ceilingDb - 0.15);
     const double hardCeiling = dbToGain (settings.ceilingDb);
@@ -288,7 +359,8 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
     static constexpr double slowAttMs[] = { 250.0, 350.0, 500.0 };
     static constexpr double slowRelMs[] = { 900.0, 700.0, 500.0 };
     const int m = std::clamp (settings.mode, 0, 2);
-    const double tr = std::clamp ((double) settings.transient, 0.0, 1.0);
+    // in spectral mode Transients is the attack emphasis of the band stage, not a release change
+    const double tr = applyDrive ? std::clamp ((double) settings.transient, 0.0, 1.0) : 0.0;
     Coeffs k;
     k.holdSamples = std::clamp ((int) std::lround (holdMs[m] * 0.001 * fs), 0, maxHold);
     k.slow = settings.releaseAuto;
@@ -300,19 +372,18 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
 
     const int delay = lookahead + TruePeakDetector8::latency();
     const int cap = (int) delayBuf[0].size();
-    float* io[2] = { left, right };
     float maxGr = 0.0f, inPk = 0.0f, outPk = 0.0f;
 
     for (int i = 0; i < numSamples; ++i)
     {
-        const double g = drive.next();
+        const double g = applyDrive ? drive.next() : 1.0;
         double peak[2];
         for (int c = 0; c < 2; ++c)
         {
-            const float x = (float) (io[c][i] * g);
+            const float x = (float) (det[c][i] * g);
             inPk = std::max (inPk, std::abs (x));
             peak[c] = detector[(size_t) c].process (x);
-            delayBuf[(size_t) c][(size_t) delayPos] = x;
+            delayBuf[(size_t) c][(size_t) delayPos] = det == app ? x : (float) (app[c][i] * g);
         }
 
         const double linked = std::max (peak[0], peak[1]);
@@ -330,8 +401,9 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
         for (int c = 0; c < 2; ++c)
         {
             const double y = delayBuf[(size_t) c][(size_t) r] * gains[c];
-            io[c][i] = (float) std::clamp (y, -hardCeiling, hardCeiling); // final safety stage
-            outPk = std::max (outPk, std::abs (io[c][i]));
+            // final sample clamp; in spectral mode the emphasised attacks pass to the clipper
+            out[c][i] = applyDrive ? (float) std::clamp (y, -hardCeiling, hardCeiling) : (float) y;
+            outPk = std::max (outPk, std::abs (out[c][i]));
             minGain = std::min (minGain, gains[c]);
         }
         const float gr = (float) gainToDb (minGain);
