@@ -148,28 +148,6 @@ int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI gui;
 
-    // Auto match order (mockup v11): lowest failing band first, lower bands re-checked after each step
-    {
-        using AM = mm::ui::AutoMatchStrip;
-        int cur = 0, bad = 0;
-        const auto expect = [&] (std::array<double, 6> d, int want, int wantCur)
-        {
-            const int got = AM::nextBand (d, cur, 0.9);
-            if (got != want || cur != wantCur)
-            {
-                std::printf ("  auto match order: got band %d (current %d), expected %d (%d)\n", got, cur, want, wantCur);
-                ++bad;
-            }
-        };
-        expect ({ 2.9, 1.5, 0, 0, 0, 0 }, 0, 0);  // Sub first
-        expect ({ 0.2, 1.5, 0, 0, 0, 0 }, 1, 1);  // Sub green: Bass next
-        expect ({ 1.3, 0.1, 0, 0, 0, 0 }, 0, 1);  // Bass fixed but Sub broke: Sub again
-        expect ({ 0.1, 0.1, 0, -1.6, 0, 0 }, 3, 3); // Low-mid green: Mid next
-        expect ({ 0.1, 0.1, 0, 0.2, 0.3, 0.4 }, -1, 5); // all green
-        std::printf ("auto match order: %s\n", bad == 0 ? "ok" : "FAILED");
-        if (bad > 0)
-            return 1;
-    }
     const juce::File outDir = argc > 1 ? juce::File (juce::String (argv[1])) : juce::File::getCurrentWorkingDirectory().getChildFile ("ui-snapshots");
     outDir.createDirectory();
 

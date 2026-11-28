@@ -232,30 +232,115 @@ public:
         });
     }
 
+    /** Hint bar (mockup v18): the tooltip of the control under the mouse in two lines, otherwise
+        the version. Line 1: name, range and what it does; line 2: advice and the other sections. */
+    void setHint (const TipBubble* tip)
+    {
+        hint.clear();
+        if (tip != nullptr && tip->getTitle().isNotEmpty())
+        {
+            const auto& secs = tip->getSections();
+            hint.push_back ({ tip->getTitle(), 0 });
+            if (tip->getValues().isNotEmpty())
+                hint.push_back ({ juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + tip->getValues(), 1 });
+            if (! secs.empty())
+                hint.push_back ({ juce::String (juce::CharPointer_UTF8 (" \xe2\x80\x94 ")) + secs.front().text, 2 });
+            hint.push_back ({ {}, -1 }); // line break
+            for (size_t i = 1; i < secs.size(); ++i)
+            {
+                hint.push_back ({ juce::String (i > 1 ? "   " : "") + secs[i].label + ": ", secs[i].warning ? 4 : 3 });
+                hint.push_back ({ secs[i].text.replace ("\n", " "), 2 });
+            }
+            if (tip->getFooter().isNotEmpty())
+                hint.push_back ({ "   " + tip->getFooter(), 5 });
+        }
+        repaint();
+    }
+
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (col::bg);
+        const bool small = getHeight() < 34;
+        const float fsz = small ? 10.5f : 12.0f;
+        g.fillAll (hint.empty() ? col::bg : juce::Colour (0xff1d2027));
         g.setColour (col::line);
         g.drawHorizontalLine (0, 0.0f, (float) getWidth());
-        auto r = getLocalBounds().reduced (10, 0).withTrimmedRight (26 + 18);
-        g.setColour (col::text3);
-        g.setFont (font (12.0f));
-        g.drawText (juce::String (mm::build::productName) + " " + mm::build::version + " (" + mm::build::gitHash + ")", r, juce::Justification::centredLeft);
+        auto r = getLocalBounds().reduced (small ? 8 : 12, 0).withTrimmedRight (26 + 18);
+
+        // right block: CPU and sample rate, latency
         const int latency = ctx.proc.getLatencySamples();
         const double fs = ctx.proc.getSampleRate();
         const double ms = fs > 0.0 ? 1000.0 * latency / fs : 0.0;
-        juce::String right = "CPU " + juce::String (100.0f * ctx.proc.getCpuLoad(), 1) + "%    " + tr ("Latency") + " " + juce::String (latency) + " " + tr ("samples") + " (" + juce::String (ms, 2) + " ms)";
+        juce::String r1 = "CPU " + juce::String (100.0f * ctx.proc.getCpuLoad(), 1) + "%";
         if (fs > 0.0)
-            right << "    " << juce::String (fs / 1000.0, fs == 44100.0 || fs == 88200.0 ? 1 : 0) << " kHz";
+            r1 << juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) << juce::String (fs / 1000.0, fs == 44100.0 || fs == 88200.0 ? 1 : 0) << " kHz";
         if (ctx.snap.droppedFrames > 0)
-            right << "    analysis dropped " << juce::String ((juce::int64) ctx.snap.droppedFrames);
-        g.drawText (right, r, juce::Justification::centredRight);
+            r1 << "  analysis dropped " << juce::String ((juce::int64) ctx.snap.droppedFrames);
+        const juce::String r2 = tr ("Latency") + " " + juce::String (latency) + " " + tr ("samples") + " (" + (ms < 10.0 ? juce::String (ms, 2) : juce::String (juce::roundToInt (ms))) + " ms)";
+        const auto f = font (fsz);
+        const int rw = juce::roundToInt (std::max (juce::GlyphArrangement::getStringWidth (f, r1), juce::GlyphArrangement::getStringWidth (f, r2))) + 4;
+        auto right = r.removeFromRight (rw);
+        r.removeFromRight (16);
+        const int lineH = small ? 13 : 15;
+        auto lines = right.withSizeKeepingCentre (right.getWidth(), 2 * lineH + 2);
+        g.setColour (col::text3);
+        g.setFont (f);
+        g.drawText (r1, lines.removeFromTop (lineH), juce::Justification::centredRight, true);
+        lines.removeFromTop (2);
+        g.drawText (r2, lines.removeFromTop (lineH), juce::Justification::centredRight, true);
+        bypassArea = r.withTrimmedLeft (r.getWidth() / 2);
+
+        // left block: the hint, or the version
+        auto left = r.withSizeKeepingCentre (r.getWidth(), 2 * lineH + 2);
+        if (hint.empty())
+        {
+            g.setColour (col::text3);
+            g.setFont (f);
+            g.drawText (juce::String (mm::build::productName) + " " + mm::build::version + " (" + mm::build::gitHash + ")", left.removeFromTop (lineH), juce::Justification::centredLeft);
+            left.removeFromTop (2);
+            g.drawText (tr ("Hover over a knob or a button: its hint and advice appear here."), left.removeFromTop (lineH), juce::Justification::centredLeft, true);
+            return;
+        }
+        g.setColour (col::magenta);
+        g.fillRect (0, 1, 2, getHeight() - 1);
+        auto line = left.removeFromTop (lineH);
+        left.removeFromTop (2);
+        int x = line.getX();
+        bool full = false;
+        const juce::Colour colours[] = { col::text, col::text2, col::text2, juce::Colour (0xffffb877), juce::Colour (0xffff8a95), col::text3 };
+        for (const auto& run : hint)
+        {
+            if (run.style < 0)
+            {
+                line = left.removeFromTop (lineH);
+                x = line.getX();
+                full = false;
+                continue;
+            }
+            if (full || run.text.isEmpty())
+                continue;
+            const auto rf = (run.style == 0 || run.style == 3 || run.style == 4) ? font (fsz, true) : font (fsz);
+            g.setColour (colours[(size_t) run.style]);
+            g.setFont (rf);
+            const int w = juce::roundToInt (juce::GlyphArrangement::getStringWidth (rf, run.text)) + 1;
+            const int avail = line.getRight() - x;
+            g.drawText (run.text, juce::Rectangle<int> (x, line.getY(), std::min (w, avail), lineH), juce::Justification::centredLeft, true);
+            x += w;
+            full = x >= line.getRight();
+        }
     }
+
+    juce::Rectangle<int> bypassArea;
 
     void resized() override { options.setBounds (getWidth() - 26 - 18, 2, 24, getHeight() - 4); }
 
     Context& ctx;
     Btn options { juce::String (juce::CharPointer_UTF8 ("\xe2\x9a\x99")) };
+    struct Run
+    {
+        juce::String text;
+        int style = 0; // 0 title, 1 values, 2 text, 3 label, 4 warning label, 5 footer, -1 line break
+    };
+    std::vector<Run> hint;
 };
 
 // ---- Editor ---------------------------------------------------------------------------------------------
@@ -301,8 +386,6 @@ MasterMindEditor::MasterMindEditor (MasterMindProcessor& p) : AudioProcessorEdit
                                                                          eyes.get(), checksCompact.get(), lowEnd.get(), stereo.get(), spectrogram.get(), albumView.get(), refsView.get(),
                                                                          player.get() })
         root->addChildComponent (c);
-    root->addChildComponent (bubble);
-    bubble.setInterceptsMouseClicks (false, false);
     topBar->onSizeButton = [this]
     {
         const auto next = mm::window::sizeAfterButtonClick (currentSize());
@@ -374,8 +457,8 @@ void MasterMindEditor::paintOverChildren (juce::Graphics& g)
         const auto f = font (12.5f * sc, true);
         const juce::String label = root->getWidth() >= 900 ? tr ("BYPASS: you hear the input") : juce::String ("BYPASS");
         const int w = juce::roundToInt (juce::GlyphArrangement::getStringWidth (f, label) + 28.0f * sc);
-        const auto fb = footer->getBounds().toFloat() * sc;
-        const auto pill = juce::Rectangle<int> (w, juce::roundToInt (fb.getHeight() - 4.0f * sc)).withCentre (fb.getCentre().roundToInt());
+        const auto fb = (footer->bypassArea + footer->getPosition()).toFloat() * sc;
+        const auto pill = juce::Rectangle<int> (w, juce::roundToInt (22.0f * sc)).withCentre (fb.getCentre().roundToInt());
         g.setColour (juce::Colour (0xff23262c));
         g.fillRoundedRectangle (pill.toFloat(), pill.getHeight() * 0.5f);
         g.setColour (juce::Colour (0xffb9bec8));
@@ -413,7 +496,7 @@ void MasterMindEditor::resized()
     auto r = root->getLocalBounds();
     topBar->setBounds (r.removeFromTop (compact || lw < 900 ? 38 : 52));
     tabBar->setBounds (r.removeFromTop (compact ? 28 : 34));
-    footer->setBounds (r.removeFromBottom (compact ? 20 : 24));
+    footer->setBounds (r.removeFromBottom (compact ? 30 : 38)); // two-line hint bar (mockup v18)
     tabBar->setTabs (compact ? juce::StringArray { "Overview", "Master", "Eyes", juce::String ("More ") + juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe")) }
                              : juce::StringArray { "Master", "Eyes", "Low-End", "Stereo", "Spectrogram", "Album", "References" });
     if (! compact && currentTab == "Overview")
@@ -499,7 +582,6 @@ void MasterMindEditor::layoutContent()
         layoutContent();
         return;
     }
-    bubble.toFront (false);
 }
 
 void MasterMindEditor::saveSizeIfChanged()
@@ -514,6 +596,7 @@ void MasterMindEditor::saveSizeIfChanged()
 
 void MasterMindEditor::updateTooltip()
 {
+    // the tooltip of the control under the mouse goes into the hint bar at once (mockup v18)
     const auto mouse = juce::Desktop::getMousePosition();
     auto* under = juce::Desktop::getInstance().findComponentAt (mouse);
     juce::Component* source = nullptr;
@@ -527,36 +610,17 @@ void MasterMindEditor::updateTooltip()
         }
     if (source != nullptr && ! root->isParentOf (source))
         source = nullptr;
-    const bool buttonDown = juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown();
-    const double now = juce::Time::getMillisecondCounterHiRes();
-    if (source != tipSource || text != tipText || buttonDown)
-    {
-        tipSource = buttonDown ? nullptr : source;
-        tipText = text;
-        tipSince = now;
-        if (tipShown)
-        {
-            bubble.setVisible (false);
-            tipShown = false;
-        }
+    if (source == tipSource && text == tipText)
         return;
-    }
-    if (tipSource != nullptr && ! tipShown && now - tipSince >= 500.0)
+    tipSource = source;
+    tipText = text;
+    if (source != nullptr)
     {
         fillTip (bubble, tipText, tipSource, ctx.apvts);
-        const auto area = root->getLocalArea (tipSource, tipSource->getLocalBounds());
-        // for large components (panels), anchor the bubble at the mouse position
-        auto target = area;
-        if (area.getWidth() > 220 || area.getHeight() > 120)
-        {
-            const auto p = root->getLocalPoint (nullptr, mouse);
-            target = juce::Rectangle<int> (p.x - 4, p.y - 4, 8, 8);
-        }
-        bubble.place (target, root->getLocalBounds());
-        bubble.setVisible (true);
-        bubble.toFront (false);
-        tipShown = true;
+        footer->setHint (&bubble);
     }
+    else
+        footer->setHint (nullptr);
 }
 
 void MasterMindEditor::timerCallback()

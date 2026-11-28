@@ -93,7 +93,8 @@ file(GLOB MM_CORE_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_SOURCE_DIR}/Source/monitoring/*.cpp
     ${CMAKE_SOURCE_DIR}/Source/reference/*.cpp
     ${CMAKE_SOURCE_DIR}/Source/presets/*.cpp
-    ${CMAKE_SOURCE_DIR}/Source/album/*.cpp)
+    ${CMAKE_SOURCE_DIR}/Source/album/*.cpp
+    ${CMAKE_SOURCE_DIR}/Source/automatch/*.cpp)
 mm_strict_sources(${MM_CORE_SOURCES})
 
 add_library(mastermind_core INTERFACE)

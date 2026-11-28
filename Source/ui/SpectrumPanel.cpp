@@ -727,7 +727,7 @@ SpectrumPanel::SpectrumPanel (Context& c, bool comp) : ctx (c), compact (comp)
     else
     {
         for (juce::Component* w : { (juce::Component*) &mode, (juce::Component*) &fft, (juce::Component*) &smoothing, (juce::Component*) &tilt,
-                                    (juce::Component*) &channel, (juce::Component*) &view, (juce::Component*) &matchEq })
+                                    (juce::Component*) &channel, (juce::Component*) &view })
             addAndMakeVisible (*w);
         setTip (mode, "c:sp.mode");
         setTip (fft, "c:sp.fft");
@@ -735,7 +735,6 @@ SpectrumPanel::SpectrumPanel (Context& c, bool comp) : ctx (c), compact (comp)
         setTip (tilt, "c:sp.tilt");
         setTip (channel, "c:sp.chan");
         setTip (view, "c:sp.view");
-        setTip (matchEq, "t:Match EQ\nSuggests up to 8 gentle EQ filters that move your average spectrum towards the reference set. Nothing changes until you press Apply.");
         mode.onChange = [this] (int i) { ctx.spectrumMode = i; };
         view.onChange = [this] (int i) { ctx.delta = i == 1; };
         fft.addItemList ({ "FFT 4096", "FFT 8192", "FFT 16384" }, 1);
@@ -747,16 +746,7 @@ SpectrumPanel::SpectrumPanel (Context& c, bool comp) : ctx (c), compact (comp)
         fft.onChange = [this] { applySettings(); };
         tilt.onChange = [this] { applySettings(); };
         channel.onChange = [this] { applySettings(); };
-        matchEq.onClick = [this]
-        {
-            if (popup == nullptr)
-            {
-                popup = std::make_unique<MatchEqPopup> (ctx, *plot);
-                addChildComponent (*popup);
-            }
-            popup->setVisible (! popup->isVisible());
-            resized();
-        };
+        // the Match EQ button was removed (mockup v18): Auto match sets the EQ from the references
     }
     smoothing.addItemList ({ compact ? "None" : "No smoothing", "1/12 oct", "1/6 oct", "1/3 oct", "1 oct" }, 1);
     smoothing.setSelectedId (ctx.engine.smoothing.load() + 1, juce::dontSendNotification);
@@ -876,7 +866,7 @@ void SpectrumPanel::resized()
             juce::Component* c;
             int w;
         };
-        const Item items[] = { { &mode, 226 }, { &smoothing, 110 }, { &view, 104 }, { &matchEq, 84 }, { &tilt, 122 }, { &channel, 82 }, { &fft, 98 } };
+        const Item items[] = { { &mode, 226 }, { &smoothing, 110 }, { &view, 104 }, { &tilt, 122 }, { &channel, 82 }, { &fft, 98 } };
         int avail = head.getWidth() - 70;
         std::vector<const Item*> shown;
         for (const auto& it : items)
@@ -889,7 +879,7 @@ void SpectrumPanel::resized()
             else
                 it.c->setVisible (false);
         // keep the visual order of the mockup (right to left)
-        for (auto* order : { (juce::Component*) &matchEq, (juce::Component*) &view, (juce::Component*) &channel, (juce::Component*) &tilt,
+        for (auto* order : { (juce::Component*) &view, (juce::Component*) &channel, (juce::Component*) &tilt,
                              (juce::Component*) &smoothing, (juce::Component*) &fft, (juce::Component*) &mode })
             for (auto* it : shown)
                 if (it->c == order)

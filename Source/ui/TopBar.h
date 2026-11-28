@@ -31,16 +31,14 @@ private:
     void showRefMenu (int slot);
     void saveAs();
     void selectRef (int slot);
-    void playRef (int slot, bool fromStart);
     void loadRefFile (int slot);
 
     Context& ctx;
     bool compact = false, medium = false;
     Btn prev { juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xb9")) }, next { juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xba")) };
     Btn presetBox { "Init" }, save { "Save" }, saveAsBtn { "Save As" };
-    Btn bypass { "Bypass", true }, match { "Match", true };
+    Btn bypass { "Bypass", true }, match { "Match Volume", true };
     std::vector<std::unique_ptr<RefButton>> refButtons;
-    Segmented ab { { "A", "B" } };
     Btn sizeBtn { "100%" };
     juce::Rectangle<int> logoArea, presetGroup, abGroup, refGroup, meterArea;
     std::unique_ptr<juce::FileChooser> chooser;

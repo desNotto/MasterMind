@@ -47,13 +47,14 @@ void LoudnessCompact::paint (juce::Graphics& g)
     r.removeFromLeft (6);
     const float h = (r.getHeight() - 6.0f) / 2.0f;
     const double ceiling = ctx.param ("lim_ceiling");
-    const auto tpCol = t.truePeak <= ceiling ? col::ok : (t.truePeak <= ceiling + 0.5 ? col::warn : col::bad);
+    // Momentary (0.4 s) and the true peak of the last 3 s follow the music at once (mockup v18)
+    const auto tpCol = t.recentTruePeak <= ceiling ? col::ok : (t.recentTruePeak <= ceiling + 0.5 ? col::warn : col::bad);
     const auto plrCol = t.plr >= 8 ? col::text : (t.plr >= 6 ? col::warn : col::bad);
     const auto c1 = r.removeFromLeft (cw).toFloat();
     r.removeFromLeft (6);
     const auto c2 = r.toFloat();
-    cell (c1.withHeight (h), tr ("Short-term"), fmtLufs (t.shortTerm), col::text, false);
-    cell (c2.withHeight (h), "True peak", fmtLufs (t.truePeak), tpCol, false);
+    cell (c1.withHeight (h), tr ("Momentary"), fmtLufs (t.momentary), col::text, false);
+    cell (c2.withHeight (h), juce::String (juce::CharPointer_UTF8 ("True peak Â· 3 s")), fmtLufs (t.recentTruePeak), tpCol, false);
     cell (c1.withTrimmedTop (h + 6.0f), "PLR", juce::String (t.plr, 1), plrCol, false);
     cell (c2.withTrimmedTop (h + 6.0f), "LRA", juce::String (t.lra, 1), col::text, false);
 }

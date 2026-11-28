@@ -2,6 +2,7 @@
 #include "ui/Locale.h"
 
 #include "dsp/ClipLimit.h"
+#include "dsp/PhaseAuto.h"
 #include "dsp/SatStereo.h"
 #include "ui/EyesView.h"
 #include "state/Parameters.h"
@@ -1791,7 +1792,91 @@ public:
 class LePhase final : public juce::Component
 {
 public:
-    explicit LePhase (Context& c) : ctx (c) { setTip (*this, "c:le.phase"); }
+    explicit LePhase (Context& c) : ctx (c)
+    {
+        setTip (*this, "c:le.phase");
+        addAndMakeVisible (autoBtn);
+        setTip (autoBtn, "c:le.auto");
+        autoBtn.onClick = [this] { autoClicked(); };
+    }
+    void resized() override { autoBtn.setBounds (getWidth() - 52, 105, 46, 18); }
+
+    /** Auto (mockup v18): two 2-second looks at the input low band, then the angle with the most
+        symmetric peaks. A second click restores the previous rotator settings. */
+    void autoClicked()
+    {
+        if (state == AutoState::applied)
+        {
+            ctx.setParam ("lem_rot_angle", prevAngle);
+            ctx.setParam ("lem_rot_on", prevOn ? 1.0f : 0.0f);
+            state = AutoState::idle;
+            refreshButton();
+            return;
+        }
+        if (state == AutoState::listening)
+            return;
+        segments.clear();
+        if (! grab())
+        {
+            if (ctx.notify)
+                ctx.notify (tr ("Play the loudest part of the song, then press Auto."));
+            return;
+        }
+        state = AutoState::listening;
+        listenSince = juce::Time::getMillisecondCounterHiRes();
+        refreshButton();
+    }
+    bool grab()
+    {
+        const auto& w = ctx.snap.in.lowWave;
+        float peak = 0.0f;
+        for (auto v : w)
+            peak = std::max (peak, std::abs (v));
+        if (w.size() < 256 || peak < 1.0e-4f)
+            return false;
+        segments.push_back (w);
+        return true;
+    }
+    void tick()
+    {
+        if (state == AutoState::listening && juce::Time::getMillisecondCounterHiRes() - listenSince >= 2000.0)
+        {
+            grab();
+            const double fs = ctx.snap.sampleRate > 0.0 ? ctx.snap.sampleRate : 48000.0;
+            const double lowRate = fs / std::max (16, (int) std::lround (fs / 1500.0)); // as the analysis
+            const auto res = mm::dsp::phaseauto::search (segments, lowRate, ctx.param ("lem_rot_freq"), (int) (0.3 * lowRate));
+            if (! res.valid)
+            {
+                state = AutoState::idle;
+                if (ctx.notify)
+                    ctx.notify (tr ("Play the loudest part of the song, then press Auto."));
+            }
+            else
+            {
+                prevAngle = ctx.param ("lem_rot_angle");
+                prevOn = ctx.param ("lem_rot_on") >= 0.5f;
+                ctx.setParam ("lem_on", 1.0f);
+                ctx.setParam ("lem_rot_on", 1.0f);
+                ctx.setParam ("lem_rot_angle", res.angle);
+                appliedAngle = res.angle;
+                state = AutoState::applied;
+            }
+            refreshButton();
+        }
+        // a manual change of the angle ends the Auto state
+        if (state == AutoState::applied && std::abs (ctx.param ("lem_rot_angle") - appliedAngle) > 0.5f)
+        {
+            state = AutoState::idle;
+            refreshButton();
+        }
+    }
+    void refreshButton()
+    {
+        autoBtn.setButtonText (state == AutoState::applied ? juce::String (juce::CharPointer_UTF8 ("\xe2\x9c\x93 Auto"))
+                                                           : (state == AutoState::listening ? juce::String (juce::CharPointer_UTF8 ("\xe2\x80\xa6")) : juce::String ("Auto")));
+        autoBtn.setToggleState (state == AutoState::applied, juce::dontSendNotification);
+        repaint();
+    }
     juce::Point<float> centre() const { return { getWidth() / 2.0f, 58.0f }; }
     void paint (juce::Graphics& g) override
     {
@@ -1837,10 +1922,12 @@ public:
         };
         g.setFont (font (10.5f));
         g.setColour (col::text3);
-        g.drawText ("before " + juce::String (juce::CharPointer_UTF8 ("\xc2\xb7 ")) + "peaks " + fmtSigned (ctx.snap.in.asymmetry, 0) + "%", juce::Rectangle<float> (8.0f, 106.0f, r.getWidth() - 16.0f, 14.0f), juce::Justification::centredLeft);
+        g.drawText ("before " + juce::String (juce::CharPointer_UTF8 ("\xc2\xb7 ")) + "peaks " + fmtSigned (ctx.snap.in.asymmetry, 0) + "%", juce::Rectangle<float> (8.0f, 106.0f, r.getWidth() - 66.0f, 14.0f), juce::Justification::centredLeft);
         wave (ctx.snap.in.lowWave, 132.0f, col::text3);
         g.setColour (leViolet);
         g.drawText ("after " + juce::String (juce::CharPointer_UTF8 ("\xc2\xb7 ")) + "peaks " + fmtSigned (ctx.snap.out.asymmetry, 0) + "%", juce::Rectangle<float> (8.0f, 146.0f, r.getWidth() - 16.0f, 14.0f), juce::Justification::centredLeft);
+        if (state == AutoState::applied)
+            g.drawText ("Auto: " + juce::String (juce::roundToInt (appliedAngle)) + juce::String (juce::CharPointer_UTF8 ("\xc2\xb0")), juce::Rectangle<float> (8.0f, 146.0f, r.getWidth() - 16.0f, 14.0f), juce::Justification::centredRight);
         wave (ctx.snap.out.lowWave, 170.0f, leViolet);
         g.setColour (col::line);
         g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
@@ -1878,6 +1965,12 @@ public:
     }
     Context& ctx;
     bool dragging = false;
+    Btn autoBtn { "Auto" };
+    enum class AutoState { idle, listening, applied } state = AutoState::idle;
+    std::vector<std::vector<float>> segments;
+    double listenSince = 0.0;
+    float prevAngle = 0.0f, appliedAngle = 0.0f;
+    bool prevOn = false;
 };
 
 /** Translator: the strongest low note and the harmonics the module adds (2nd and 3rd from
@@ -1986,6 +2079,7 @@ public:
     {
         ModuleEditor::update();
         graph.repaint();
+        phase.tick();
         phase.repaint();
         trans.repaint();
         readoutPtr->repaint();

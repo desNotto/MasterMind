@@ -86,8 +86,6 @@ private:
 
     juce::Component* tipSource = nullptr;
     juce::String tipText;
-    double tipSince = 0.0;
-    bool tipShown = false;
     juce::String toast;
     double toastUntil = 0.0;
     bool lastPlayer = false, lastBypass = false;

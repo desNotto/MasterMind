@@ -18,7 +18,7 @@ public:
     void paint (juce::Graphics& g) override
     {
         const auto& slot = owner.ctx.refs.slot (index);
-        const bool selected = owner.ctx.refs.selected() == index && owner.ctx.refs.previewing() == juce::File();
+        const bool selected = owner.ctx.refs.selected() == index;
         auto r = getLocalBounds().toFloat().reduced (0.5f);
         if (selected && slot.state == reference::ReferenceLibrary::State::ready)
         {
@@ -74,7 +74,6 @@ TopBar::TopBar (Context& c) : ctx (c)
 {
     for (auto* b : { &prev, &next, &presetBox, &save, &saveAsBtn, &bypass, &match, &sizeBtn })
         addAndMakeVisible (*b);
-    addAndMakeVisible (ab);
     for (int i = 0; i < reference::ReferenceLibrary::numSlots; ++i)
     {
         refButtons.push_back (std::make_unique<RefButton> (*this, i));
@@ -88,7 +87,6 @@ TopBar::TopBar (Context& c) : ctx (c)
     setTip (saveAsBtn, "c:pre.saveas");
     setTip (bypass, "c:bypass");
     setTip (match, "c:match");
-    setTip (ab, "c:ab");
     setTip (sizeBtn, "c:size");
 
     prev.onClick = [this] { juce::String e; ctx.presets.loadNext (-1, e); };
@@ -106,21 +104,6 @@ TopBar::TopBar (Context& c) : ctx (c)
     bypass.onClick = [this] { ctx.monitoring.chainBypass = bypass.getToggleState(); };
     match.setToggleState (true, juce::dontSendNotification);
     match.onClick = [this] { ctx.monitoring.matchOn = match.getToggleState(); };
-    ab.onChange = [this] (int i)
-    {
-        if (i == 1 && ctx.refs.selected() < 0)
-        {
-            for (int s = 0; s < reference::ReferenceLibrary::numSlots; ++s)
-                if (ctx.refs.slot (s).state == reference::ReferenceLibrary::State::ready)
-                {
-                    ctx.refs.select (s);
-                    break;
-                }
-        }
-        ctx.monitoring.referenceActive = (i == 1 && ctx.refs.selected() >= 0);
-        ctx.monitoring.refPlaying = ctx.monitoring.referenceActive.load();
-        ab.setSelected (ctx.monitoring.referenceActive ? 1 : 0, false);
-    };
     sizeBtn.onClick = [this] { if (onSizeButton) onSizeButton(); };
 
     ctx.presets.addChangeListener (this);
@@ -148,7 +131,6 @@ void TopBar::setCompact (bool c)
     saveAsBtn.setVisible (! compact && ! medium);
     for (auto& r : refButtons)
         r->setVisible (! compact);
-    ab.setVisible (! compact);
     resized();
 }
 
@@ -164,7 +146,6 @@ void TopBar::update()
     presetBox.setButtonText (name);
 
     bypass.setToggleState (ctx.monitoring.chainBypass.load(), juce::dontSendNotification);
-    ab.setSelected (ctx.monitoring.referenceActive.load() ? 1 : 0, false);
     for (auto& r : refButtons)
         r->repaint();
     repaint (meterArea);
@@ -230,12 +211,12 @@ void TopBar::paint (juce::Graphics& g)
         };
         if (compact)
         {
-            drawMeter ({}, fmtLufs (o.shortTerm), col::text, 72, "LUFS");
+            drawMeter ({}, fmtLufs (o.momentary), col::text, 72, "LUFS"); // Momentary 0.4 s: follows the music at once (mockup v18)
             drawMeter ({}, fmtLufs (o.truePeak), tpCol, 70, "dBTP");
         }
         else
         {
-            drawMeter ("S-T", fmtLufs (o.shortTerm), col::text, 72);
+            drawMeter ("M", fmtLufs (o.momentary), col::text, 72);
             drawMeter ("TP", fmtLufs (o.truePeak), tpCol, 64);
             if (meterArea.getWidth() >= 230)
                 drawMeter ("PLR", o.hasSignal ? juce::String (o.plr, 1) : juce::String (juce::CharPointer_UTF8 ("\xe2\x80\x93")), o.hasSignal ? plrCol : col::text2, 64);
@@ -283,15 +264,15 @@ void TopBar::resized()
         }
     }
     r.removeFromLeft (8);
-    abGroup = r.removeFromLeft (4 + 60 + 4 + 56 + 4);
+    abGroup = r.removeFromLeft (4 + 60 + 4 + 100 + 4);
     {
         auto g = abGroup.reduced (4, 0);
         bypass.setBounds (centreY (g.removeFromLeft (60)));
         g.removeFromLeft (4);
-        match.setBounds (centreY (g.removeFromLeft (56)));
+        match.setBounds (centreY (g.removeFromLeft (100)));
     }
     r.removeFromLeft (8);
-    refGroup = r.removeFromLeft (4 + 6 * 24 + 4 + 48 + 4);
+    refGroup = r.removeFromLeft (4 + 6 * 24 + 4);
     {
         auto g = refGroup.reduced (4, 0);
         for (auto& b : refButtons)
@@ -299,8 +280,6 @@ void TopBar::resized()
             b->setBounds (centreY (g.removeFromLeft (22)));
             g.removeFromLeft (2);
         }
-        g.removeFromLeft (4);
-        ab.setBounds (centreY (g.removeFromLeft (48)));
     }
     r.removeFromLeft (8);
     sizeBtn.setBounds (centreY (r.removeFromRight (54)));
@@ -442,19 +421,9 @@ void TopBar::saveAs()
 
 void TopBar::selectRef (int slot)
 {
-    // 1-6 only switch the reference: B and playback stay as they are (D-036)
-    if (ctx.refs.selected() != slot || ctx.refs.previewing() != juce::File())
-        ctx.refs.select (slot);
-    update();
-}
-
-void TopBar::playRef (int slot, bool fromStart)
-{
-    selectRef (slot);
-    ctx.monitoring.referenceActive = true;
-    ctx.monitoring.refPlaying = true;
-    if (fromStart)
-        ctx.monitoring.seekRequest = 0.0;
+    // 1-6 only choose the reference for the analysis and Auto match; they never start or switch
+    // playback, which belongs to the References tab (mockup v18)
+    ctx.refs.choose (slot);
     update();
 }
 
@@ -482,10 +451,6 @@ void TopBar::showRefMenu (int slot)
     menu.addItem (2, "Clear", s.state != reference::ReferenceLibrary::State::empty);
     menu.addItem (3, "In reference set (target and corridor)", s.state == reference::ReferenceLibrary::State::ready, s.inSet);
     menu.addSeparator();
-    const bool playingThis = ctx.monitoring.referenceActive.load() && ctx.monitoring.refPlaying.load() && ctx.refs.selected() == slot
-                             && ctx.refs.previewing() == juce::File();
-    menu.addItem (4, playingThis ? "Pause" : "Play", s.state == reference::ReferenceLibrary::State::ready);
-    menu.addItem (5, "Play from start", s.state == reference::ReferenceLibrary::State::ready);
     juce::PopupMenu matchMenu;
     matchMenu.addItem (10, "Auto: current section (short-term)", true, ctx.monitoring.refMatchMode == 0);
     matchMenu.addItem (11, "Auto: whole track (integrated)", true, ctx.monitoring.refMatchMode == 1);
@@ -503,15 +468,6 @@ void TopBar::showRefMenu (int slot)
         }
         else if (r == 3)
             ctx.refs.setInSet (slot, ! ctx.refs.slot (slot).inSet);
-        else if (r == 4)
-        {
-            if (ctx.refs.selected() == slot && ctx.refs.previewing() == juce::File() && mon.referenceActive.load())
-                mon.refPlaying = ! mon.refPlaying.load();
-            else
-                playRef (slot, false);
-        }
-        else if (r == 5)
-            playRef (slot, true);
         else if (r >= 10 && r <= 12)
             mon.refMatchMode = r - 10;
         ctx.proc.syncExtraState();

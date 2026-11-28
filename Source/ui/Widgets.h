@@ -185,6 +185,12 @@ public:
     void paint (juce::Graphics&) override;
     int width = 356; // 410 for the tonal balance advice (mockup v7)
 
+    // the content, for the hint bar at the bottom of the window (mockup v18)
+    const juce::String& getTitle() const noexcept { return title; }
+    const juce::String& getValues() const noexcept { return values; }
+    const std::vector<Section>& getSections() const noexcept { return sections; }
+    const juce::String& getFooter() const noexcept { return footer; }
+
 private:
     juce::String title, values, footer;
     std::vector<Section> sections;

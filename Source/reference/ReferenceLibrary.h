@@ -67,6 +67,10 @@ public:
     void select (int index);
     int selected() const { return selectedSlot; }
 
+    /** The buttons 1-6 (mockup v18): makes the slot the selected reference for the analysis and
+        Auto match without touching playback. References play only from the References tab. */
+    void choose (int index);
+
     /** Plays a library song (References tab) through B without assigning it to a slot. Decodes in
         the background, then switches B on and starts playback. Selecting a slot ends the preview. */
     void preview (const juce::File& file);

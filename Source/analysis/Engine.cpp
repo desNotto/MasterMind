@@ -123,6 +123,38 @@ std::vector<float> Engine::outSpectrumNormalised()
     return reference::normalisedSpectrum (outTap);
 }
 
+void Engine::startCapture (double seconds)
+{
+    const juce::ScopedLock sl (prepareLock);
+    captureTotal = std::max (1, (int) (seconds * fs));
+    capture.setSize (2, captureTotal, false, true, false);
+    captureFill = 0;
+    capturing = true;
+}
+
+void Engine::cancelCapture()
+{
+    const juce::ScopedLock sl (prepareLock);
+    capturing = false;
+    captureFill = 0;
+    captureTotal = 0;
+    capture.setSize (0, 0);
+}
+
+juce::AudioBuffer<float> Engine::takeCapture()
+{
+    const juce::ScopedLock sl (prepareLock);
+    juce::AudioBuffer<float> out;
+    if (captureTotal > 0 && captureFill.load() >= captureTotal)
+    {
+        out = std::move (capture);
+        capture = {};
+        captureTotal = 0;
+        captureFill = 0;
+    }
+    return out;
+}
+
 void Engine::setTargets (const Targets& t)
 {
     const juce::SpinLock::ScopedLockType sl (targetLock);
@@ -204,6 +236,24 @@ void Engine::run()
                     if (size2 > 0)
                         read (start2, size2, size1);
                     fifo.finishedRead (n);
+
+                    if (capturing.load())
+                    {
+                        // Auto match recording of the input; silent chunks (before playback) are skipped
+                        float peak = 0.0f;
+                        for (int i = 0; i < n; ++i)
+                            peak = std::max (peak, std::max (std::abs (inL[(size_t) i]), std::abs (inR[(size_t) i])));
+                        const int fill = captureFill.load();
+                        if (peak > 1.0e-4f && fill < captureTotal)
+                        {
+                            const int c = std::min (n, captureTotal - fill);
+                            capture.copyFrom (0, fill, inL.data(), c);
+                            capture.copyFrom (1, fill, inR.data(), c);
+                            captureFill = fill + c;
+                            if (fill + c >= captureTotal)
+                                capturing = false;
+                        }
+                    }
 
                     inTap.process (inL.data(), inR.data(), n);
                     outTap.process (outL.data(), outR.data(), n);

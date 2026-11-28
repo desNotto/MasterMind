@@ -284,6 +284,12 @@ void ReferenceLibrary::preview (const juce::File& file)
     sendChangeMessage();
 }
 
+void ReferenceLibrary::choose (int index)
+{
+    selectedSlot = index;
+    sendChangeMessage();
+}
+
 void ReferenceLibrary::select (int index)
 {
     selectedSlot = index;

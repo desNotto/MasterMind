@@ -28,7 +28,6 @@ private:
     Segmented modeCompact { { "RT", "Avg" } };
     Dropdown fft, smoothing, tilt, channel;
     Segmented view { { "Curve", "Delta" } };
-    Btn matchEq { "Match EQ" };
     std::unique_ptr<Plot> plot;
     std::unique_ptr<MatchEqPopup> popup;
     std::unique_ptr<BandFields> bandPanel;

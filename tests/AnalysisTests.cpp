@@ -7,6 +7,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <cstring>
 
@@ -143,14 +144,13 @@ TEST_CASE ("Checks give plain-language labels and lights", "[analysis][checks]")
     in.hasSignal = true;
     Targets t;
     const auto checks = computeChecks (in, t, Thresholds {});
-    REQUIRE (checks.size() == 12);
+    REQUIRE (checks.size() == 11); // the Integrated row was removed (mockup v18)
     CHECK (checks[0].light == Light::bad);
     CHECK (tonalLabel (0, 2.4) == "Sub +2.4 dB vs target");
     CHECK (checks[6].light == Light::ok);   // mono loss
     CHECK (checks[8].light == Light::warn); // PLR 7.8
     CHECK (checks[9].light == Light::bad);  // harshness +3.1
     CHECK (checks[10].light == Light::ok);  // true peak below ceiling
-    CHECK (checks[11].light == Light::info);
     for (const auto& c : checks)
         CHECK (c.tooltip.isNotEmpty());
 }
@@ -223,4 +223,33 @@ TEST_CASE ("AutoEQ/REW parametric profiles parse; corrupt input is rejected", "[
         maxDb = std::max (maxDb, db);
     }
     CHECK (maxDb <= 0.01); // auto preamp: no boost above 0 dB
+}
+
+TEST_CASE ("Analysis CPU benchmark", "[.bench]")
+{
+    // two taps (input and output) as the engine runs them, 20 s of noise at 48 kHz
+    const double fs = 48000.0;
+    std::vector<float> l ((size_t) (fs * 20.0)), r (l.size());
+    uint32_t seed = 1;
+    for (size_t i = 0; i < l.size(); ++i)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        l[i] = ((float) (seed >> 8) / 16777216.0f - 0.5f) * 0.5f;
+        r[i] = 0.8f * l[i];
+    }
+    for (int order : { 12, 13, 14 })
+    {
+        TapAnalyzer a, b;
+        a.prepare (fs, order);
+        b.prepare (fs, order);
+        const auto t0 = std::chrono::steady_clock::now();
+        for (size_t off = 0; off < l.size(); off += 2048)
+        {
+            const int n = (int) std::min<size_t> (2048, l.size() - off);
+            a.process (l.data() + off, r.data() + off, n);
+            b.process (l.data() + off, r.data() + off, n);
+        }
+        const double sec = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
+        WARN ("fft order " << order << ": " << (100.0 * sec / 20.0) << " % of real time for two taps");
+    }
 }

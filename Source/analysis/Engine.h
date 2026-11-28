@@ -112,6 +112,16 @@ public:
 
     void setTargets (const Targets& t);
     Targets getTargets() const;
+
+    /** Auto match (D-040): records the plugin input on the analysis thread (never the audio thread).
+        Silent chunks are skipped, so the recording waits for playback. UI thread. */
+    void startCapture (double seconds);
+    void cancelCapture();
+    /** 0..1 while recording, 1 when the recording is complete. */
+    float captureProgress() const noexcept { return captureTotal > 0 ? (float) captureFill.load() / (float) captureTotal : 0.0f; }
+    /** Moves the completed recording out (empty buffer if not complete). UI thread. */
+    juce::AudioBuffer<float> takeCapture();
+    double getSampleRate() const noexcept { return fs; }
     void setThresholds (const Thresholds& t);
 
 private:
@@ -128,6 +138,10 @@ private:
 
     double fs = 48000.0;
     TapAnalyzer inTap, outTap;
+    juce::AudioBuffer<float> capture;
+    std::atomic<int> captureFill { 0 };
+    int captureTotal = 0;
+    std::atomic<bool> capturing { false };
     GrHistogram clipHist, limHist;
     int samplesToSecond = 0, currentOrder = 13;
     uint64_t samplesSinceReset = 0;
