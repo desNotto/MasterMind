@@ -54,7 +54,7 @@ void LoudnessCompact::paint (juce::Graphics& g)
     r.removeFromLeft (6);
     const auto c2 = r.toFloat();
     cell (c1.withHeight (h), tr ("Momentary"), fmtLufs (t.momentary), col::text, false);
-    cell (c2.withHeight (h), juce::String (juce::CharPointer_UTF8 ("True peak Â· 3 s")), fmtLufs (t.recentTruePeak), tpCol, false);
+    cell (c2.withHeight (h), juce::String (juce::CharPointer_UTF8 ("True peak \xc2\xb7 3 s")), fmtLufs (t.recentTruePeak), tpCol, false);
     cell (c1.withTrimmedTop (h + 6.0f), "PLR", juce::String (t.plr, 1), plrCol, false);
     cell (c2.withTrimmedTop (h + 6.0f), "LRA", juce::String (t.lra, 1), col::text, false);
 }

@@ -271,7 +271,7 @@ Generated from `Source/state/Parameters.cpp`. The IDs are frozen since M1 (spec 
 | `clip_mix` | Clipper Mix | 0% to 100% | 100% | yes |
 | `clip_lowprot` | Clipper Low Protect | Off / On | On | yes |
 | `lim_on` | Limiter On | Off / On | Off | yes |
-| `lim_lookahead` | Limiter Lookahead | 0.5 ms to 5.0 ms | 2.0 ms | no |
+| `lim_lookahead` | Limiter Lookahead | 0.5 ms to 10 ms | 2.0 ms | no |
 | `lim_rel` | Limiter Release | 10 ms to 500 ms | 100 ms | yes |
 | `lim_rel_auto` | Limiter Release Auto | Off / On | On | yes |
 | `lim_mode` | Limiter Mode | Transparent, Balanced, Aggressive | Balanced | yes |
@@ -301,3 +301,7 @@ Generated from `Source/state/Parameters.cpp`. The IDs are frozen since M1 (spec 
 | `lim_adapt_gain` | Limiter Adaptive Gain | 0.0 dB to 12.0 dB | 6.0 dB | yes |
 | `lim_adapt_speed` | Limiter Adaptive Speed | 0% to 100% | 70% | yes |
 | `lim_adapt_trans` | Limiter Adaptive Transients | 0% to 100% | 50% | yes |
+| `lim_clip` | Limiter Clip | 0.0 dB to 9.0 dB | 0.0 dB | yes |
+| `lim_leveler` | Limiter Leveler | 0% to 100% | 0% | yes |
+| `lim_soften` | Limiter Soften | 0% to 100% | 0% | yes |
+| `lim_density` | Limiter Density | 0% to 100% | 0% | yes |

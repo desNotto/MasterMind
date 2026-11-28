@@ -283,6 +283,7 @@ Features Twin::run (const ParamMap& knobs, const juce::AudioBuffer<float>& audio
             f.busGr += -h.chain.getBusComp().gainReductionDb();
             for (int b = 0; b < 2; ++b)
                 eqSum[(size_t) b] += std::max (-100.0f, h.chain.getEq().detectorLevelDb (b));
+            f.clipDb += h.chain.getLimiter().clipReductionDb();
             if (const float* tr = h.chain.limiterTrace())
             {
                 double sum = 0.0;
@@ -302,12 +303,14 @@ Features Twin::run (const ParamMap& knobs, const juce::AudioBuffer<float>& audio
         }
         f.busLevel = f.busLevel / meterBlocks;
         f.busGr /= meterBlocks;
+        f.clipDb /= meterBlocks;
         for (size_t b = 0; b < 2; ++b)
             f.eqLevel[b] = eqSum[b] / meterBlocks;
     }
     if (grMeans.size() > 2)
     {
         const double mean = std::accumulate (grMeans.begin(), grMeans.end(), 0.0) / (double) grMeans.size();
+        f.grMean = -mean;
         double var = 0.0;
         for (auto g : grMeans)
             var += sq (g - mean);
@@ -677,6 +680,124 @@ void Matcher::run()
     const auto xf = toUnit (fin);
     bestCost = (float) cost (finalFeatures, target, xf, xf, 0.0);
     stage = 4;
+    done = true;
+}
+// ---- LoudnessSearch ------------------------------------------------------------------------------------------
+double LoudnessSearch::artefactCost (const Features& f, const ParamMap& p)
+{
+    const auto v = [&p] (const char* id) { const auto it = p.find (id); return it != p.end() ? (double) it->second : 0.0; };
+    return sq (f.grMean / 4.0)                  // heavy limiting: distortion of the bass and the attacks
+           + sq (f.grStd / 1.0)                 // pumping
+           + 0.7 * sq (f.clipDb / 3.0)          // clipping
+           + 0.5 * sq (v ("infl_effect") / 50.0) // density of the Inflator
+           + 0.5 * sq (v ("lim_soften") / 50.0)  // softer drums
+           + 0.3 * sq (v ("lim_density") / 100.0);
+}
+
+LoudnessSearch::LoudnessSearch (double sampleRate, const ParamMap& current, juce::AudioBuffer<float> excerpt, int pre, double targetLufs, int threads)
+    : juce::Thread ("MasterMind Reach target"), fs (sampleRate), base (current), audio (std::move (excerpt)), preroll (pre), target (targetLufs)
+{
+    for (auto [id, v] : { std::pair { "clip_on", 1.0f }, { "lim_on", 1.0f } })
+        base[id] = v;
+    base["lim_ceiling"] = std::min (base.count ("lim_ceiling") > 0 ? base["lim_ceiling"] : -1.0f, -1.0f);
+    const int n = std::clamp (threads, 1, 8);
+    for (int i = 0; i < n; ++i)
+        twins.push_back (std::make_unique<Twin> (fs, base));
+}
+
+LoudnessSearch::~LoudnessSearch() { stopThread (10000); }
+
+LoudnessSearch::Outcome LoudnessSearch::solve (int worker, const Candidate& c)
+{
+    Outcome o;
+    o.p = base;
+    o.p["infl_effect"] = c.infl;
+    o.p["lim_clip"] = c.clip;
+    o.p["lim_density"] = c.density;
+    o.p["lim_soften"] = c.soften;
+    o.p["lim_leveler"] = c.leveler;
+    // Drive by the secant method, from the current Drive
+    float d = std::clamp (base.count ("lim_drive") > 0 ? base["lim_drive"] : 0.0f, 0.0f, 24.0f);
+    double slope = 0.8, lastL = 0.0;
+    float lastD = -1.0f;
+    for (int it = 0; it < 4 && ! threadShouldExit(); ++it)
+    {
+        o.p["lim_drive"] = d;
+        o.f = twins[(size_t) worker]->run (o.p, audio, preroll);
+        ++evals;
+        const double err = target - o.f.lufs;
+        if (std::abs (err) <= 0.25)
+        {
+            o.ok = true;
+            break;
+        }
+        if (lastD >= 0.0f && std::abs (d - lastD) > 0.05f)
+            slope = std::clamp ((o.f.lufs - lastL) / (double) (d - lastD), 0.15, 1.2);
+        lastD = d;
+        lastL = o.f.lufs;
+        const float next = (float) std::clamp (std::round ((d + err / slope) * 10.0) / 10.0, 0.0, 24.0);
+        if (std::abs (next - d) < 0.05f)
+            break; // at a limit of the Drive
+        d = next;
+    }
+    return o;
+}
+
+void LoudnessSearch::run()
+{
+    const bool bands = base.count ("lim_bands") > 0 && base["lim_bands"] > 0.5f;
+    std::vector<Candidate> cands = {
+        { 0, 0, 0, 0, 0 },   { 20, 0, 0, 0, 0 },   { 40, 0, 0, 0, 0 },   { 0, 3, 0, 0, 0 },    { 0, 6, 0, 0, 0 },
+        { 20, 3, 0, 0, 50 }, { 20, 6, 0, 0, 50 },  { 0, 3, 50, 0, 50 },  { 20, 3, 50, 0, 50 }, { 40, 3, 0, 0, 50 },
+        { 40, 6, 50, 0, 50 },
+    };
+    if (bands) // Soften works with the band limiter only
+        for (const Candidate c : { Candidate { 20, 3, 0, 30, 50 }, Candidate { 20, 6, 50, 30, 50 }, Candidate { 0, 6, 50, 30, 50 } })
+            cands.push_back (c);
+    plannedEvals = (int) cands.size() * 3;
+    std::vector<Outcome> out (cands.size());
+    std::vector<std::thread> pool;
+    const int workers = (int) twins.size();
+    for (int w = 0; w < workers; ++w)
+        pool.emplace_back ([&, w]
+        {
+            for (size_t i = (size_t) w; i < cands.size(); i += (size_t) workers)
+                if (! threadShouldExit())
+                    out[i] = solve (w, cands[i]);
+        });
+    for (auto& t : pool)
+        t.join();
+    if (threadShouldExit())
+        return;
+    // the cleanest candidate that reaches the target; without one, the loudest
+    int best = -1;
+    double bestCost = 1.0e30, bestLufs = -1.0e30;
+    for (size_t i = 0; i < out.size(); ++i)
+    {
+        if (out[i].ok)
+        {
+            const double c = artefactCost (out[i].f, out[i].p);
+            if (best < 0 || ! out[(size_t) best].ok || c < bestCost)
+            {
+                best = (int) i;
+                bestCost = c;
+            }
+        }
+        else if ((best < 0 || ! out[(size_t) best].ok) && out[i].f.lufs > bestLufs)
+        {
+            best = (int) i;
+            bestLufs = out[i].f.lufs;
+        }
+    }
+    if (best >= 0)
+    {
+        const auto& o = out[(size_t) best];
+        for (const auto* id : { "clip_on", "lim_on", "lim_ceiling", "infl_effect", "lim_clip", "lim_density", "lim_soften", "lim_leveler", "lim_drive" })
+            result[id] = o.p.at (id);
+        reachedLufs = o.f.lufs;
+        reached = o.ok;
+        artefacts = artefactCost (o.f, o.p);
+    }
     done = true;
 }
 } // namespace mm::automatch

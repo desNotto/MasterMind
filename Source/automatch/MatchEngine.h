@@ -39,6 +39,8 @@ struct Features
     double busLevel = -100.0, busGr = 0.0;
     std::array<double, 2> eqLevel { -100.0, -100.0 }; // detector level of the dynamic EQ bands 1 and 2
     double grStd = 0.0; // pumping: standard deviation of the limiter gain reduction (10 ms means), dB
+    double grMean = 0.0; // average limiter gain reduction, dB (>= 0)
+    double clipDb = 0.0; // average peak reduction of the spectral clipper, dB
 };
 
 /** The reference the match aims at (reference set or the selected reference). */
@@ -129,6 +131,47 @@ private:
     Target target;
     std::vector<std::unique_ptr<Twin>> twins;
     std::array<double, 5> mbTargetGr {};
+};
+
+/** Reach target with a distortion budget (D-042): every candidate mix of the loudness stages
+    (Inflator Effect, Clip, Leveler, Density, Soften) gets the Limiter Drive that reaches the target
+    loudness on the twin (secant steps); of those that reach it, the one with the least artefacts
+    (limiter gain reduction, pumping, clipping, density) wins. Construct on the message thread. */
+class LoudnessSearch final : public juce::Thread
+{
+public:
+    LoudnessSearch (double sampleRate, const ParamMap& current, juce::AudioBuffer<float> excerpt, int preroll, double targetLufs, int threads);
+    ~LoudnessSearch() override;
+    void run() override;
+
+    std::atomic<int> evals { 0 }, plannedEvals { 1 };
+    std::atomic<bool> done { false };
+    ParamMap result;     // the parameters to set
+    double reachedLufs = -100.0, artefacts = 0.0;
+    bool reached = false;
+
+    /** Artefact cost of a processed excerpt with these stage settings (lower is cleaner). */
+    static double artefactCost (const Features& f, const ParamMap& p);
+
+private:
+    struct Candidate
+    {
+        float infl, clip, density, soften, leveler;
+    };
+    struct Outcome
+    {
+        ParamMap p;
+        Features f;
+        bool ok = false;
+    };
+    Outcome solve (int worker, const Candidate& c);
+
+    double fs;
+    ParamMap base;
+    juce::AudioBuffer<float> audio;
+    int preroll;
+    double target;
+    std::vector<std::unique_ptr<Twin>> twins;
 };
 
 /** The fixed part of every match: subsonic filter, EQ band layout, neutral dynamics, gentle

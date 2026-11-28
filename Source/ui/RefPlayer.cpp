@@ -68,7 +68,7 @@ RefPlayer::RefPlayer (Context& c)
     setTip (play, "t:Play / pause\nPlays or pauses the reference. Space in the host still controls your song.");
     setTip (restart, "t:From the start\nPlays the reference from the beginning.");
     setTip (close, "t:Back to A\nStops the reference. You hear your mix again.");
-    setTip (*this, "t:Waveform of the reference\nClick or drag to move in the song. The coloured part is already played.");
+    setTip (*this, "c:ref.region");
     setMouseCursor (juce::MouseCursor::NormalCursor);
 }
 
@@ -108,7 +108,11 @@ void RefPlayer::seekTo (double fraction)
 void RefPlayer::mouseMove (const juce::MouseEvent& e)
 {
     const double f = waveArea.contains (e.getPosition()) ? fractionAt (e.x) : -1.0;
-    setMouseCursor (f >= 0.0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+    const auto region = ctx.refs.region (currentFile());
+    const bool edge = f >= 0.0 && region.valid()
+                      && (std::abs (e.position.x - xOfSeconds (region.start)) <= 5.0f || std::abs (e.position.x - xOfSeconds (region.end)) <= 5.0f);
+    setMouseCursor (edge ? juce::MouseCursor::LeftRightResizeCursor
+                         : (f >= 0.0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor));
     if (f != hoverFraction)
     {
         hoverFraction = f;
@@ -122,28 +126,88 @@ void RefPlayer::mouseExit (const juce::MouseEvent&)
     repaint();
 }
 
+juce::File RefPlayer::currentFile() const
+{
+    const auto* ref = ctx.monitoring.currentReferenceForUi();
+    return ref != nullptr ? ref->file : juce::File();
+}
+
+float RefPlayer::xOfSeconds (double s) const
+{
+    const double len = ctx.monitoring.refLengthSeconds.load();
+    return len > 0.0 ? (float) waveArea.getX() + (float) (s / len) * (float) waveArea.getWidth() : (float) waveArea.getX();
+}
+
 void RefPlayer::mouseDown (const juce::MouseEvent& e)
 {
+    drag = Drag::none;
     if (! waveArea.contains (e.getPosition()))
         return;
-    dragFraction = fractionAt (e.x);
-    seekTo (dragFraction);
+    const auto file = currentFile();
+    const auto region = ctx.refs.region (file);
+    if (region.valid() && pillClose.contains (e.position))
+    {
+        ctx.refs.setRegion (file, 0.0, 0.0); // the cross clears the region
+        ctx.proc.syncExtraState();
+        repaint();
+        return;
+    }
+    downX = e.x;
+    if (region.valid() && std::abs (e.position.x - xOfSeconds (region.start)) <= 5.0f)
+        drag = Drag::startEdge;
+    else if (region.valid() && std::abs (e.position.x - xOfSeconds (region.end)) <= 5.0f)
+        drag = Drag::endEdge;
+    else
+    {
+        // a click seeks; a drag becomes a selection (decided in mouseDrag)
+        drag = Drag::seek;
+        dragFraction = fractionAt (e.x);
+        seekTo (dragFraction);
+    }
+    selA = region.start;
+    selB = region.end;
     repaint();
 }
 
 void RefPlayer::mouseDrag (const juce::MouseEvent& e)
 {
-    if (dragFraction < 0.0)
+    const double len = ctx.monitoring.refLengthSeconds.load();
+    if (drag == Drag::none || len <= 0.0)
         return;
-    dragFraction = fractionAt (e.x);
-    hoverFraction = dragFraction;
-    seekTo (dragFraction);
+    const double t = fractionAt (e.x) * len;
+    if (drag == Drag::seek && std::abs (e.x - downX) > 4)
+    {
+        drag = Drag::select;
+        selA = fractionAt (downX) * len;
+        dragFraction = -1.0;
+    }
+    if (drag == Drag::seek)
+    {
+        dragFraction = fractionAt (e.x);
+        hoverFraction = dragFraction;
+        seekTo (dragFraction);
+    }
+    else if (drag == Drag::select || drag == Drag::endEdge)
+        selB = t;
+    else if (drag == Drag::startEdge)
+        selA = t;
     repaint();
 }
 
 void RefPlayer::mouseUp (const juce::MouseEvent&)
 {
+    if (drag == Drag::select || drag == Drag::startEdge || drag == Drag::endEdge)
+    {
+        const double a = std::min (selA, selB), b = std::max (selA, selB);
+        if (b - a >= 1.0) // at least a second; shorter drags change nothing
+        {
+            ctx.refs.setRegion (currentFile(), a, b);
+            ctx.proc.syncExtraState();
+        }
+    }
+    drag = Drag::none;
     dragFraction = -1.0;
+    repaint();
 }
 
 void RefPlayer::paint (juce::Graphics& g)
@@ -238,8 +302,47 @@ void RefPlayer::paint (juce::Graphics& g)
         g.fillRect (px, mid - hq, 1.0f, 2.0f * hq);
     }
 
+    // metrics region: blue zone with handles and a label with a cross (mockup v19)
+    {
+        auto region = ctx.refs.region (ref->file);
+        const bool dragging = drag == Drag::select || drag == Drag::startEdge || drag == Drag::endEdge;
+        if (dragging)
+            region = { std::min (selA, selB), std::max (selA, selB) };
+        pillClose = {};
+        if (len > 0.0 && region.end > region.start)
+        {
+            const float x0 = std::max (wa.getX(), xOfSeconds (region.start)), x1 = std::min (wa.getRight(), xOfSeconds (std::min (region.end, len)));
+            const auto blue = juce::Colour (0xff4ea1ff);
+            g.setColour (blue.withAlpha (0.16f));
+            g.fillRect (juce::Rectangle<float> (x0, wa.getY(), x1 - x0, wa.getHeight()));
+            g.setColour (blue);
+            g.fillRect (x0 - 1.0f, wa.getY(), 2.0f, wa.getHeight());
+            g.fillRect (x1 - 1.0f, wa.getY(), 2.0f, wa.getHeight());
+            g.fillRoundedRectangle (juce::Rectangle<float> (x0 - 3.0f, wa.getCentreY() - 7.0f, 6.0f, 14.0f), 2.0f);
+            g.fillRoundedRectangle (juce::Rectangle<float> (x1 - 3.0f, wa.getCentreY() - 7.0f, 6.0f, 14.0f), 2.0f);
+            const juce::String label = "Metrics " + clockText (region.start) + u8 ("\xe2\x80\x93") + clockText (region.end) + u8 (" \xc2\xb7 ")
+                                     + juce::String (juce::roundToInt (region.end - region.start)) + " s"
+                                     + (ctx.refs.isAnalysingRegion (ref->file) ? tr (u8 (" \xc2\xb7 analysing\xe2\x80\xa6")) : juce::String());
+            const auto f = font (11.0f, true);
+            const float lw = juce::GlyphArrangement::getStringWidth (f, label) + 26.0f;
+            auto pill = juce::Rectangle<float> (x0 + 3.0f, wa.getY() + 2.0f, lw, 15.0f);
+            if (pill.getRight() > wa.getRight() - 2.0f)
+                pill.setX (std::max (wa.getX() + 2.0f, wa.getRight() - 2.0f - lw));
+            g.setColour (juce::Colour (0xff163152));
+            g.fillRoundedRectangle (pill, 3.0f);
+            g.setColour (juce::Colour (0xffcfe3ff));
+            g.setFont (f);
+            g.drawText (label, pill.withTrimmedLeft (6.0f).withTrimmedRight (18.0f), juce::Justification::centredLeft, false);
+            if (! dragging)
+            {
+                pillClose = pill.removeFromRight (16.0f);
+                g.drawText (u8 ("\xe2\x9c\x95"), pillClose, juce::Justification::centred, false);
+            }
+        }
+    }
+
     // hover position and play head
-    if (hoverFraction >= 0.0 && dragFraction < 0.0)
+    if (hoverFraction >= 0.0 && dragFraction < 0.0 && drag == Drag::none)
     {
         const float hx = wa.getX() + (float) hoverFraction * wa.getWidth();
         g.setColour (juce::Colours::white.withAlpha (0.35f));

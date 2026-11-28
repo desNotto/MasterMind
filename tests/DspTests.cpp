@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "TestHost.h"
+#include "analysis/Loudness.h"
 #include "dsp/Filters.h"
 
 #include <juce_dsp/juce_dsp.h>
@@ -347,11 +348,12 @@ TEST_CASE ("Limiter true peak stays at or below the ceiling + 0.05 dB with +24 d
         kick.setSample (1, i, (float) kk);
     }
 
-    // Classic and 26 bands, and 26 bands with full attack emphasis (the clipper and the safety stage)
+    // Classic and 26 bands, 26 bands with full attack emphasis (the clipper and the safety stage), and
+    // Classic and 26 bands with the D-042 stages at their maximum (Clip, Leveler, Soften, 10 ms lookahead)
     for (auto* sig : { &pink, &sweep, &kick })
-        for (int variant = 0; variant < 7; ++variant)
+        for (int variant = 0; variant < 9; ++variant)
         {
-            const int mode = variant % 3, bands = variant < 3 ? 0 : 3;
+            const int mode = variant % 3, bands = (variant < 3 || variant == 7) ? 0 : 3;
             Host h;
             h.set ("lim_on", 1.0f);
             h.set ("lim_drive", 24.0f);
@@ -359,6 +361,13 @@ TEST_CASE ("Limiter true peak stays at or below the ceiling + 0.05 dB with +24 d
             h.set ("lim_mode", (float) mode);
             h.set ("lim_bands", (float) bands);
             h.set ("lim_transient", variant == 6 ? 100.0f : 0.0f);
+            if (variant >= 7)
+            {
+                h.set ("lim_clip", 6.0f);
+                h.set ("lim_leveler", 100.0f);
+                h.set ("lim_soften", variant == 8 ? 100.0f : 0.0f);
+                h.set ("lim_lookahead", 10.0f);
+            }
             h.chain.prepare (fs, 512, false);
             juce::AudioBuffer<float> b;
             b.makeCopyOf (*sig);
@@ -755,6 +764,148 @@ TEST_CASE ("Resonance suppressor cuts a sticking-out tone and keeps its latency"
     CHECK (imp.getSample (0, peakPos) == Catch::Approx (0.5f).margin (0.01f));
 }
 
+namespace
+{
+/** A dense metal-like mix: kick and snare on a grid, a distorted guitar chord, a bass note. */
+juce::AudioBuffer<float> metalMix (double fs, double seconds)
+{
+    const int n = (int) (fs * seconds);
+    juce::AudioBuffer<float> b (2, n);
+    juce::Random r (5);
+    for (int i = 0; i < n; ++i)
+    {
+        const double t = (double) i / fs;
+        const double beat = std::fmod (t, 0.25), bar = std::fmod (t, 1.0);
+        const double kick = std::exp (-beat * 25.0) * std::sin (twoPi * (48.0 + 120.0 * std::exp (-beat * 40.0)) * beat) * 0.8;
+        const double sn = (bar > 0.5 && bar < 0.6) ? std::exp (-(bar - 0.5) * 35.0) * ((r.nextDouble() - 0.5) * 0.9 + 0.3 * std::sin (twoPi * 190.0 * t)) : 0.0;
+        double gtr = 0.0;
+        for (double f : { 73.4, 110.0, 146.8 })
+            gtr += std::tanh (3.0 * std::sin (twoPi * f * t + 0.3 * std::sin (twoPi * 5.0 * t)));
+        gtr *= 0.16;
+        const double bass = 0.25 * std::sin (twoPi * 36.7 * t);
+        const double l = kick + sn + gtr * 1.05 + bass, rr = kick + sn + gtr * 0.95 + bass;
+        b.setSample (0, i, (float) (0.5 * l));
+        b.setSample (1, i, (float) (0.5 * rr));
+    }
+    return b;
+}
+
+double integratedLufs (const juce::AudioBuffer<float>& b, double fs)
+{
+    mm::analysis::LoudnessMeter m;
+    m.prepare (fs);
+    m.process (b.getReadPointer (0), b.getReadPointer (1), b.getNumSamples());
+    return m.integrated();
+}
+
+double runLimiter (const juce::AudioBuffer<float>& src, double fs, float drive, int bands, float clip, float leveler, float soften, float look, juce::AudioBuffer<float>& out,
+                   int mode = 1, float adaptGain = 6.0f, float density = 0.0f)
+{
+    Host h;
+    h.set ("lim_on", 1.0f);
+    h.set ("lim_density", density);
+    h.set ("lim_mode", (float) mode);
+    h.set ("lim_adapt_gain", adaptGain);
+    h.set ("lim_drive", drive);
+    h.set ("lim_ceiling", -1.0f);
+    h.set ("lim_bands", (float) bands);
+    h.set ("lim_clip", clip);
+    h.set ("lim_leveler", leveler);
+    h.set ("lim_soften", soften);
+    h.set ("lim_lookahead", look);
+    h.chain.prepare (fs, 512, false);
+    out.makeCopyOf (src);
+    mmtest::runChain (h, out, 512);
+    return integratedLufs (out, fs);
+}
+} // namespace
+
+namespace
+{
+/** Pumping: the standard deviation (dB) of a quiet steady 2 kHz pilot tone, measured in 20 ms
+    windows (Goertzel), after the first second. */
+double pilotPumpingDb (const juce::AudioBuffer<float>& b, double fs)
+{
+    const int win = (int) (0.02 * fs);
+    std::vector<double> lv;
+    for (int from = (int) fs; from + win < b.getNumSamples(); from += win)
+    {
+        double re = 0.0, im = 0.0;
+        for (int i = 0; i < win; ++i)
+        {
+            const double x = b.getSample (0, from + i);
+            re += x * std::cos (twoPi * 2000.0 * (from + i) / fs);
+            im -= x * std::sin (twoPi * 2000.0 * (from + i) / fs);
+        }
+        lv.push_back (20.0 * std::log10 (std::sqrt (re * re + im * im) + 1.0e-12));
+    }
+    double m = 0.0;
+    for (auto v : lv)
+        m += v;
+    m /= (double) lv.size();
+    double var = 0.0;
+    for (auto v : lv)
+        var += (v - m) * (v - m);
+    return std::sqrt (var / (double) lv.size());
+}
+} // namespace
+
+TEST_CASE ("Limiter Clip, Soften and Density make a dense mix louder with less pumping", "[dsp][limiter]")
+{
+    // at full Drive the D-042 stages give more loudness and less pumping of a steady pilot tone
+    const double fs = 48000.0;
+    auto mix = metalMix (fs, 6.0);
+    for (int i = 0; i < mix.getNumSamples(); ++i)
+        for (int ch = 0; ch < 2; ++ch)
+            mix.setSample (ch, i, mix.getSample (ch, i) + (float) (0.03 * std::sin (twoPi * 2000.0 * i / fs)));
+    juce::AudioBuffer<float> a, b;
+    for (int bands : { 0, 3 })
+    {
+        const double plain = runLimiter (mix, fs, 24.0f, bands, 0.0f, 0.0f, 0.0f, 2.0f, a);
+        const double more = runLimiter (mix, fs, 24.0f, bands, 6.0f, 0.0f, bands > 0 ? 60.0f : 0.0f, 2.0f, b, 1, 6.0f, 100.0f);
+        const double pumpPlain = pilotPumpingDb (a, fs), pumpMore = pilotPumpingDb (b, fs);
+        INFO ("bands " << bands << ": plain " << plain << " LUFS (pumping " << pumpPlain << " dB), with the stages " << more << " LUFS (pumping " << pumpMore << " dB)");
+        CHECK (more > plain + 0.7);
+        CHECK (pumpMore < pumpPlain);
+        CHECK (independentTruePeakDb (b, nullptr) <= -1.0 + 0.05);
+    }
+}
+
+TEST_CASE ("Limiter loudness benchmark (D-042 stages)", "[.bench]")
+{
+    // every variant is driven to -7 LUFS (bisection on Drive); then the pumping of a quiet steady
+    // pilot tone shows what the loudness costs, and the drive shows how hard the limiter works
+    const double fs = 48000.0;
+    auto mix = metalMix (fs, 8.0);
+    for (int i = 0; i < mix.getNumSamples(); ++i)
+        for (int ch = 0; ch < 2; ++ch)
+            mix.setSample (ch, i, mix.getSample (ch, i) + (float) (0.03 * std::sin (twoPi * 2000.0 * i / fs)));
+    juce::AudioBuffer<float> o;
+    struct V
+    {
+        const char* name;
+        int bands;
+        float clip, lev, soft, look;
+        int mode;
+        float ag, dens;
+    };
+    const V vs[] = { { "26 Balanced", 3, 0, 0, 0, 2, 1, 6, 0 }, { "26 Clip 3", 3, 3, 0, 0, 2, 1, 6, 0 }, { "26 Clip 6", 3, 6, 0, 0, 2, 1, 6, 0 },
+                     { "26 Clip 6 Density 100", 3, 6, 0, 0, 2, 1, 6, 100 }, { "26 Soften 100", 3, 0, 0, 100, 2, 1, 6, 0 },
+                     { "26 all max", 3, 6, 100, 100, 10, 1, 6, 100 } };
+    for (const auto& v : vs)
+    {
+        double lo = 0.0, hi = 24.0, l = 0.0;
+        for (int it = 0; it < 9; ++it)
+        {
+            const double d = 0.5 * (lo + hi);
+            l = runLimiter (mix, fs, (float) d, v.bands, v.clip, v.lev, v.soft, v.look, o, v.mode, v.ag, v.dens);
+            (l < -7.0 ? lo : hi) = d;
+        }
+        WARN (v.name << ": Drive " << juce::String (0.5 * (lo + hi), 1) << " dB for " << juce::String (l, 2) << " LUFS, pilot pumping "
+                     << juce::String (pilotPumpingDb (o, fs), 2) << " dB");
+    }
+}
+
 TEST_CASE ("Limiter CPU benchmark", "[.bench]")
 {
     const double fs = 48000.0;
@@ -767,12 +918,19 @@ TEST_CASE ("Limiter CPU benchmark", "[.bench]")
         l[(size_t) i] = (float) (0.8 * std::exp (-tk * 9.0) * std::sin (twoPi * 55.0 * tk) + 0.2 * (random.nextDouble() - 0.5));
         r[(size_t) i] = l[(size_t) i] * 0.9f;
     }
-    for (int variant = 0; variant < 3; ++variant)
+    for (int variant = 0; variant < 4; ++variant)
     {
         mm::dsp::Limiter lim;
         lim.settings.bands = variant == 0 ? 0 : 3;
         lim.settings.driveDb = 8.0f;
         lim.settings.transient = variant == 2 ? 0.5f : 0.0f;
+        if (variant == 3) // the D-042 stages
+        {
+            lim.settings.clipDb = 6.0f;
+            lim.settings.leveler = 0.6f;
+            lim.settings.soften = 0.4f;
+            lim.settings.density = 1.0f;
+        }
         mm::dsp::Context ctx { fs, 512 };
         lim.prepare (ctx);
         auto a = l, b = r;
@@ -791,3 +949,4 @@ TEST_CASE ("Limiter CPU benchmark", "[.bench]")
     const auto ms = juce::Time::getMillisecondCounterHiRes() - t0;
     std::printf ("bank only: %.2f %% of real time\n", ms / 200.0);
 }
+

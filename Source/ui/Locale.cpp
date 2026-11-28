@@ -131,6 +131,11 @@ const std::map<juce::String, juce::String>& russianTable()
         add ("Latency", "Задержка");
         add ("Hover over a knob or a button: its hint and advice appear here.", "Наведите курсор на ручку или кнопку: здесь появится подсказка и совет.");
         add ("Play the loudest part of the song, then press Auto.", "Включите самое громкое место песни и нажмите Auto.");
+        add ("the plugin finds the cleanest way to reach it", "плагин ищет самый чистый способ до неё дойти");
+        add ("12 s of the song are recorded, then a copy of the chain tries the Inflator, Clip, Leveler, Density and Soften with the Drive that reaches the target, and keeps the mix with the least distortion and pumping. True peak stays at the Ceiling.",
+             "Плагин записывает 12 с песни, затем на копии цепочки пробует Inflator, Clip, Leveler, Density и Soften с Drive до цели и оставляет вариант с наименьшими искажениями и «качанием». True peak остаётся на Ceiling.");
+        add ("Trying the loudness stages:", "Пробую ступени громкости:");
+        add ("The target cannot be reached cleanly: this is the loudest result.", "Цель недостижима без перегруза: это самый громкий результат.");
         add ("Listen", "Запись");
         add ("Analyse", "Анализ");
         add ("Formula", "Формулы");

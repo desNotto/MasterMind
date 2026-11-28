@@ -39,7 +39,7 @@ struct ParamPtrsImpl
     std::array<SatBand, 3> satb {};
     A stSplit, stMid, stHigh, stBal, stGuard, stGuardThr;
     A inflInput, inflEffect, inflCurve, inflOutput, inflClip, inflSplit;
-    A limLook, limRel, limRelAuto, limMode, limDrive, limCeil, limLink, limTrans, limBands, limAGain, limASpeed, limATrans;
+    A limLook, limRel, limRelAuto, limMode, limDrive, limCeil, limLink, limTrans, limBands, limAGain, limASpeed, limATrans, limClip, limLevel, limSoft, limDens;
     A outGain, outDither, outBits;
 };
 
@@ -159,6 +159,10 @@ ParamPtrsImpl resolve (const params::Raw& r)
     p.limAGain = r.get ("lim_adapt_gain");
     p.limASpeed = r.get ("lim_adapt_speed");
     p.limATrans = r.get ("lim_adapt_trans");
+    p.limClip = r.get ("lim_clip");
+    p.limLevel = r.get ("lim_leveler");
+    p.limSoft = r.get ("lim_soften");
+    p.limDens = r.get ("lim_density");
     p.outGain = r.get ("out_gain");
     p.outDither = r.get ("out_dither");
     p.outBits = r.get ("out_bits");
@@ -364,6 +368,10 @@ void MasterChain::readSettings() noexcept
     li.adaptGainDb = v (q.limAGain);
     li.adaptSpeed = v (q.limASpeed) * 0.01f;
     li.adaptTrans = v (q.limATrans) * 0.01f;
+    li.clipDb = v (q.limClip);
+    li.leveler = v (q.limLevel) * 0.01f;
+    li.soften = v (q.limSoft) * 0.01f;
+    li.density = v (q.limDens) * 0.01f;
 
     auto& out = outputModule.settings;
     out.gainDb = v (q.outGain);

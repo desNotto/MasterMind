@@ -40,6 +40,7 @@ public:
         float adaptSpeed = 0.7f;  // 0: equal time constants, 1: low bands slow, high bands fast
         float emphasis = 0.0f;    // attack emphasis 0..1 (up to +6 dB)
         float adaptTrans = 0.5f;  // 0: one emphasis for all bands, 1: every band on its own
+        float soften = 0.0f;      // transient softening 0..1 (up to -6 dB on attacks, both outputs, D-042)
         float link = 1.0f;
         int mode = 1;             // Transparent, Balanced, Aggressive (release base)
         double ceiling = 0.89;    // linear, for the pressure estimate
@@ -73,7 +74,7 @@ private:
     struct GainState
     {
         std::array<double, maxBands> program {}, peak {}, offset {}, fast {}, slow {};
-        std::array<std::array<float, maxBands>, 16> emphDelay {};
+        std::array<std::array<float, maxBands>, 16> emphDelay {}, softDelay {};
         int emphPos = 0;
         std::array<float, maxBands> gShaped {}, gFull {};
     };

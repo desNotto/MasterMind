@@ -189,7 +189,7 @@ std::vector<Spec> build()
 
     // ---- 4.9 Limiter -----------------------------------------------------------------------
     v.push_back (b ("lim_on", "Limiter On", false));
-    v.push_back (f ("lim_lookahead", "Limiter Lookahead", 0.5f, 5.0f, 2.0f, Unit::ms, 0.0f, 0.1f));
+    v.push_back (f ("lim_lookahead", "Limiter Lookahead", 0.5f, 10.0f, 2.0f, Unit::ms, 0.0f, 0.1f));
     v.back().automatable = false;
     v.push_back (f ("lim_rel", "Limiter Release", 10.0f, 500.0f, 100.0f, Unit::ms, 80.0f));
     v.push_back (b ("lim_rel_auto", "Limiter Release Auto", true));
@@ -232,6 +232,11 @@ std::vector<Spec> build()
     v.push_back (f ("lim_adapt_gain", "Limiter Adaptive Gain", 0.0f, 12.0f, 6.0f, Unit::dB, 0.0f, 0.1f));
     v.push_back (f ("lim_adapt_speed", "Limiter Adaptive Speed", 0.0f, 100.0f, 70.0f, Unit::percent, 0.0f, 1.0f));
     v.push_back (f ("lim_adapt_trans", "Limiter Adaptive Transients", 0.0f, 100.0f, 50.0f, Unit::percent, 0.0f, 1.0f));
+    // D-042: spectral clipper, slow first stage (leveler), transient softening
+    v.push_back (f ("lim_clip", "Limiter Clip", 0.0f, 9.0f, 0.0f, Unit::dB, 0.0f, 0.1f));
+    v.push_back (f ("lim_leveler", "Limiter Leveler", 0.0f, 100.0f, 0.0f, Unit::percent, 0.0f, 1.0f));
+    v.push_back (f ("lim_soften", "Limiter Soften", 0.0f, 100.0f, 0.0f, Unit::percent, 0.0f, 1.0f));
+    v.push_back (f ("lim_density", "Limiter Density", 0.0f, 100.0f, 0.0f, Unit::percent, 0.0f, 1.0f));
 
     return v;
 }

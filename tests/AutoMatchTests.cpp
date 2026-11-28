@@ -217,3 +217,29 @@ TEST_CASE ("Reference metrics region: only that part of the song is analysed", "
     CHECK (region->tonal[0] < whole->tonal[0] - 10.0);
     CHECK (std::abs (region->durationSeconds - 5.0) < 0.1);
 }
+
+TEST_CASE ("Reach target finds a clean way to the target loudness", "[automatch][reach]")
+{
+    const double fs = 48000.0;
+    const auto mix = makeSignal (fs, 4.5, 1.0f, 1.0f, 0.3f, 0.6f, 11u);
+    auto current = defaults();
+    current["lim_on"] = 1.0f;
+    analysis::TapAnalyzer in;
+    in.setLightweight (true);
+    in.prepare (fs, 13);
+    in.process (mix.getReadPointer (0), mix.getReadPointer (1), mix.getNumSamples());
+    const double target = in.loudness().integrated() + 8.0;
+    const auto t0 = std::chrono::steady_clock::now();
+    automatch::LoudnessSearch s (fs, current, mix, (int) (0.5 * fs), target, 8);
+    s.startThread();
+    while (! s.done.load() && s.isThreadRunning())
+        juce::Thread::sleep (20);
+    s.waitForThreadToExit (-1);
+    const double sec = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
+    REQUIRE (s.done.load());
+    INFO ("target " << target << " reached " << s.reachedLufs << " in " << sec << " s, " << s.evals.load() << " passes; Drive " << s.result["lim_drive"]
+                    << " Clip " << s.result["lim_clip"] << " Inflator " << s.result["infl_effect"] << " artefacts " << s.artefacts);
+    CHECK (s.reached);
+    CHECK (std::abs (s.reachedLufs - target) <= 0.3);
+    CHECK (s.result.count ("lim_drive") == 1);
+}

@@ -269,48 +269,70 @@ void SpectralBank::computeGains (GainState& st, const float* el, const float* es
     const double as = std::clamp ((double) settings.adaptSpeed, 0.0, 1.0);
     const double ag = std::clamp ((double) settings.adaptGainDb, 0.0, 24.0);
 
-    std::array<double, maxBands> excess {}, emph {};
-    double sumE = 0.0, sumEX = 0.0, sumS = 0.0, sumSE = 0.0;
+    std::array<double, maxBands> excess {}, emph {}, soft {}, relMul {}, masked {};
+    double sumE = 0.0, sumEX = 0.0, sumS = 0.0, sumSE = 0.0, sumSS = 0.0;
+    const double sf = std::clamp ((double) settings.soften, 0.0, 1.0);
     for (int b = 0; b < nb; ++b)
     {
-        const double L = 10.0 * std::log10 ((double) el[b] + 1.0e-20);
-        auto& prog = st.program[(size_t) b];
-        prog = prog < -250.0 ? L : L + cProgram * (prog - L);
-        const double relB = rel0 * std::clamp (std::pow (150.0 / set.fc[(size_t) b], 0.6 * as), 0.35, 3.0);
-        auto& pk = st.peak[(size_t) b];
-        pk = L > pk ? L : L + coeffFor (frameSec, relB) * (pk - L);
-        excess[(size_t) b] = std::max (0.0, pk - prog);
-        sumE += el[b];
-        sumEX += el[b] * excess[(size_t) b];
-
-        // attack emphasis from the short analysis: fast envelope above the slow one
+        // attack detection from the short analysis: fast envelope above the slow one
         const double S = 10.0 * std::log10 ((double) es[b] + 1.0e-20);
         auto& fa = st.fast[(size_t) b];
         auto& sl = st.slow[(size_t) b];
         fa = (S > fa || fa < -250.0) ? S : S + cFastRel * (fa - S);
         sl = sl < -250.0 ? S : S + cSlow * (sl - S);
-        emph[(size_t) b] = settings.emphasis * std::clamp (fa - sl - 1.0, 0.0, 6.0);
+        const double attack = std::clamp (fa - sl - 1.0, 0.0, 6.0);
+        emph[(size_t) b] = settings.emphasis * attack;
+        soft[(size_t) b] = -sf * attack; // softening: the same detector, the other direction (D-042)
         sumS += es[b];
         sumSE += es[b] * emph[(size_t) b];
+        sumSS += es[b] * soft[(size_t) b];
+        // program-dependent release (D-042): fast after hits, slow on sustained notes
+        relMul[(size_t) b] = 1.0 + as * ((1.6 - 1.15 * attack / 6.0) - 1.0);
+
+        const double L = 10.0 * std::log10 ((double) el[b] + 1.0e-20);
+        auto& prog = st.program[(size_t) b];
+        prog = prog < -250.0 ? L : L + cProgram * (prog - L);
+        const double relB = relMul[(size_t) b] * rel0 * std::clamp (std::pow (150.0 / set.fc[(size_t) b], 0.6 * as), 0.35, 3.0);
+        auto& pk = st.peak[(size_t) b];
+        pk = L > pk ? L : L + coeffFor (frameSec, relB) * (pk - L);
+        excess[(size_t) b] = std::max (0.0, pk - prog);
+        sumE += el[b];
+        sumEX += el[b] * excess[(size_t) b];
+    }
+    // masking (D-042): how far each band lies under the spread of its louder neighbours (about one
+    // band per Bark for 26 bands; upward masking 12 dB per band, downward 27 dB per band). A masked
+    // band may take more reduction: its gain changes are not heard.
+    const double perBand = 26.0 / nb;
+    for (int b = 0; b < nb; ++b)
+    {
+        double maskDb = -300.0;
+        for (int j = 0; j < nb; ++j)
+            if (j != b)
+                maskDb = std::max (maskDb, st.program[(size_t) j] - (b > j ? 12.0 : 27.0) * std::abs (b - j) * perBand);
+        masked[(size_t) b] = std::clamp ((maskDb - st.program[(size_t) b]) / 12.0, 0.0, 1.0);
     }
     const double meanExcess = sumE > 0.0 ? sumEX / sumE : 0.0;
     const double meanEmph = sumS > 0.0 ? sumSE / sumS : 0.0;
+    const double meanSoft = sumS > 0.0 ? sumSS / sumS : 0.0;
     const double w = std::clamp (pressureDb / 2.0, 0.0, 1.0); // only near the limit
     const double at = std::clamp ((double) settings.adaptTrans, 0.0, 1.0);
     const int delayFrames = std::clamp ((filterLength / 2 - blockSize) / blockSize, 0, 15);
     for (int b = 0; b < nb; ++b)
     {
-        double target = -std::min (ag, std::max (0.0, excess[(size_t) b] - meanExcess)) * w;
+        const double mk = masked[(size_t) b];
+        double target = -std::min (ag * (1.0 + 0.5 * mk), std::max (0.0, excess[(size_t) b] - meanExcess * (1.0 - 0.5 * mk))) * w;
         target = std::max (target, -pressureDb);
         auto& off = st.offset[(size_t) b];
-        const double relB = rel0 * std::clamp (std::pow (150.0 / set.fc[(size_t) b], 0.6 * as), 0.35, 3.0);
+        const double relB = relMul[(size_t) b] * rel0 * std::clamp (std::pow (150.0 / set.fc[(size_t) b], 0.6 * as), 0.35, 3.0);
         off = target < off ? target + cAttack * (off - target) : target + coeffFor (frameSec, relB) * (off - target);
-        st.gShaped[(size_t) b] = (float) std::pow (10.0, off / 20.0);
-
-        // emphasis: blend with the mean (Adaptive Trans), delayed to line up with the output
+        // emphasis and softening: blend with the mean (Adaptive Trans), delayed to line up with the output
         st.emphDelay[(size_t) st.emphPos][(size_t) b] = (float) (at * emph[(size_t) b] + (1.0 - at) * meanEmph);
+        st.softDelay[(size_t) st.emphPos][(size_t) b] = (float) (at * soft[(size_t) b] + (1.0 - at) * meanSoft);
         const int rd = (st.emphPos - delayFrames + 16) % 16;
         const float e = st.emphDelay[(size_t) rd][(size_t) b];
+        const float sd = st.softDelay[(size_t) rd][(size_t) b];
+        // the softening is in both outputs: the limiter core hears the softer attacks
+        st.gShaped[(size_t) b] = (float) std::pow (10.0, (off + sd) / 20.0);
         st.gFull[(size_t) b] = st.gShaped[(size_t) b] * (float) std::pow (10.0, e / 20.0);
     }
     st.emphPos = (st.emphPos + 1) % 16;

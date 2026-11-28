@@ -1,6 +1,7 @@
 #include "ui/ModuleEditors.h"
 #include "ui/Locale.h"
 
+#include "automatch/MatchEngine.h"
 #include "dsp/ClipLimit.h"
 #include "dsp/PhaseAuto.h"
 #include "dsp/SatStereo.h"
@@ -9,6 +10,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <thread>
 
 namespace mm::ui
 {
@@ -2787,9 +2789,17 @@ public:
         rel.onUserChange = [this] { ctx.setParam ("lim_rel_auto", 0.0f); };
         row = { &makeKnob (*this, "lim_drive", "Drive", "li.drive", clMag), &makeKnob (*this, "lim_ceiling", "Ceiling", "li.ceil", clMag), &rel,
                 &makeKnob (*this, "lim_lookahead", "Lookahead", "li.la", clMag), &makeKnob (*this, "lim_link", "Link", "li.link", clMag) };
-        // the band knobs (D-037); in Classic they show "off"
+        // the loudness stages (D-042): spectral clipper, slow first stage, density
+        for (auto [id, label, tip] : { std::tuple { "lim_clip", "Clip", "li.clip" }, { "lim_leveler", "Leveler", "li.lev" }, { "lim_density", "Density", "li.dens" } })
+        {
+            auto& k = makeKnob (*this, id, label, tip, clMag);
+            if (juce::String (id) != "lim_clip")
+                k.valueStep = 1.0f;
+            loudRow.push_back (&k);
+        }
+        // the band knobs (D-037, Soften D-042); in Classic they show "off"
         for (auto [id, label, tip] : { std::tuple { "lim_adapt_gain", "Adaptive Gain", "li.again" }, { "lim_adapt_speed", "Adaptive Speed", "li.aspeed" },
-                                       { "lim_transient", "Transients", "li.trans" }, { "lim_adapt_trans", "Adaptive Trans", "li.atrans" } })
+                                       { "lim_transient", "Transients", "li.trans" }, { "lim_soften", "Soften", "li.soft" }, { "lim_adapt_trans", "Adaptive Trans", "li.atrans" } })
         {
             auto& k = makeKnob (*this, id, label, tip, clMag);
             if (juce::String (id) != "lim_transient")
@@ -2797,12 +2807,13 @@ public:
                 {
                     return ctx.param ("lim_bands") < 0.5f ? juce::String ("off") : ctx.apvts.getParameter (k.getParamId())->getCurrentValueAsText();
                 };
-            if (juce::String (id) == "lim_adapt_speed" || juce::String (id) == "lim_adapt_trans")
+            if (juce::String (id) == "lim_adapt_speed" || juce::String (id) == "lim_adapt_trans" || juce::String (id) == "lim_soften")
                 k.valueStep = 1.0f;
             spectralRow.push_back (&k);
         }
     }
-    int naturalHeight (int) const override { return compact ? headH + 8 + 120 + 8 + knobH + 8 : headH + 8 + 176 + 8 + knobH + 8; }
+    // two knob rows (D-042): core and loudness stages, then the band knobs
+    int naturalHeight (int) const override { return compact ? headH + 8 + 120 + 8 + 2 * knobH + 14 : headH + 8 + 176 + 8 + 2 * knobH + 14; }
     void update() override
     {
         ModuleEditor::update();
@@ -2835,7 +2846,9 @@ public:
         auto kr = r.removeFromTop (knobH);
         const int w = layoutKnobRow (kr, row);
         separatorX = kr.getX() + w + 12;
-        layoutKnobRow (kr.withTrimmedLeft (w + 25), spectralRow);
+        layoutKnobRow (kr.withTrimmedLeft (w + 25), loudRow);
+        r.removeFromTop (6);
+        layoutKnobRow (r.removeFromTop (knobH), spectralRow);
     }
     void paint (juce::Graphics& g) override
     {
@@ -2844,13 +2857,15 @@ public:
         {
             g.setColour (col::line);
             g.drawVerticalLine (separatorX, (float) row.front()->getY() + 4.0f, (float) row.front()->getBottom() - 4.0f);
+            if (! spectralRow.empty())
+                g.drawHorizontalLine (spectralRow.front()->getY() - 3, (float) row.front()->getX(), (float) separatorX + 200.0f);
         }
     }
     LiTime time;
     LiBands bandView;
     ModeList modes;
     Dropdown bandsBox;
-    std::vector<Knob*> spectralRow;
+    std::vector<Knob*> spectralRow, loudRow;
     int separatorX = 0;
     Btn relAuto { "Auto release", true };
     Painter* readout = nullptr;
@@ -2890,12 +2905,18 @@ public:
         reach.accent = true;
         setTip (reach, "c:out.reach");
         reach.onClick = [this] { start(); };
-        stopBtn.onClick = [this] { finish ("Stopped. Undo restores the Inflator and the Limiter.", false); };
+        stopBtn.onClick = [this] { stopSearch(); finish ("Stopped. Undo restores the Inflator and the Limiter.", false); };
         undoBtn.onClick = [this] { undo(); };
         row = { &makeKnob (*this, "out_gain", "Gain", "out.gain", col::orange, true) };
         startTimerHz (10);
     }
-    ~OutputEditor() override { stopTimer(); }
+    ~OutputEditor() override
+    {
+        stopTimer();
+        if (state == State::running && search == nullptr)
+            ctx.engine.cancelCapture();
+        search.reset();
+    }
     int naturalHeight (int) const override { return headH + 8 + 116 + 8 + knobH + 8; }
 
     void update() override
@@ -2959,7 +2980,7 @@ private:
         g.drawText ("Loudness target", title.removeFromLeft (124), juce::Justification::centredLeft);
         g.setColour (col::text3);
         g.setFont (font (12.5f));
-        g.drawText (tr ("the plugin sets the Inflator and the Limiter to reach it"), title, juce::Justification::centredLeft, true);
+        g.drawText (tr ("the plugin finds the cleanest way to reach it"), title, juce::Justification::centredLeft, true);
         const auto local = [&] (juce::Rectangle<int> a) { return a - box->getPosition(); };
         g.drawText ("Target", local (targetLabel), juce::Justification::centredLeft);
         juce::String text = status;
@@ -2978,7 +2999,7 @@ private:
         g.drawText (text, local (statusArea), state == State::idle && status.isEmpty() ? juce::Justification::centredRight : juce::Justification::centredLeft, true);
         g.setColour (col::text3);
         g.setFont (font (12.0f));
-        g.drawFittedText (tr ("The work is split: the Inflator adds density up to 50% Effect, the Limiter the rest. True peak stays at the Ceiling. Louder than about -7 LUFS: listen to the drums."),
+        g.drawFittedText (tr ("12 s of the song are recorded, then a copy of the chain tries the Inflator, Clip, Leveler, Density and Soften with the Drive that reaches the target, and keeps the mix with the least distortion and pumping. True peak stays at the Ceiling."),
                           local (noteArea), juce::Justification::topLeft, 2);
     }
 
@@ -2989,31 +3010,34 @@ private:
         done
     };
 
+    // Reach target with a distortion budget (D-042): 12 s of the song are recorded on the analysis
+    // thread, then LoudnessSearch tries the loudness stages on a copy of the chain in the background
+    static constexpr const char* touched[] = { "clip_on", "infl_effect", "lim_on", "lim_drive", "lim_ceiling", "lim_clip", "lim_density", "lim_soften", "lim_leveler" };
     void start()
     {
         snapshot.clear();
-        for (const auto* id : { "clip_on", "infl_effect", "lim_on", "lim_drive", "lim_ceiling" })
+        for (const auto* id : touched)
             snapshot[id] = ctx.param (id);
         ctx.monitoring.referenceActive = false;
-        if (ctx.param ("clip_on") < 0.5f)
-            ctx.setParam ("infl_effect", 0.0f); // a switched-off Inflator starts neutral
-        ctx.setParam ("clip_on", 1.0f);
-        ctx.setParam ("lim_on", 1.0f);
-        ctx.setParam ("lim_ceiling", std::min (ctx.param ("lim_ceiling"), -1.0f));
+        ctx.monitoring.refPlaying = false;
+        ctx.engine.startCapture (12.0);
         state = State::running;
-        attempts = 0;
         reached = false;
+        lastCapture = 0.0;
+        noSignal = 0.0;
         startedAt = juce::Time::getMillisecondCounterHiRes();
-        status = "Measuring the loudness";
-        restart();
+        status = tr ("Recording the song");
         showButtons();
     }
-    void restart()
+    void stopSearch()
     {
-        ctx.engine.requestReset();
-        waited = 0.0;
-        inflSum = 0.0;
-        inflN = 0;
+        if (search != nullptr)
+        {
+            search->signalThreadShouldExit();
+            search.reset();
+        }
+        else
+            ctx.engine.cancelCapture();
     }
     void finish (const juce::String& msg, bool ok)
     {
@@ -3040,71 +3064,74 @@ private:
         undoBtn.setVisible (state == State::done && ! snapshot.empty());
         box->repaint();
     }
+    juce::String clock() const
+    {
+        const int t = juce::roundToInt ((juce::Time::getMillisecondCounterHiRes() - startedAt) / 1000.0);
+        return juce::String (t / 60) + ":" + juce::String (t % 60).paddedLeft ('0', 2);
+    }
     void timerCallback() override
     {
         if (state != State::running)
             return;
-        if (ctx.snap.out.momentary > -50.0)
+        const auto dot = juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 "));
+        if (search == nullptr)
         {
-            waited += 0.1;
-            noSignal = 0.0;
-            inflSum += ctx.proc.getChain().getInflator().inflateDb();
-            ++inflN;
-        }
-        else
-            noSignal += 0.1;
-        if (waited < 4.0)
-            return;
-        const double targetLufs = ctx.param ("out_target"), measured = ctx.snap.out.integrated;
-        const double err = targetLufs - measured;
-        const double inflGain = inflN > 0 ? inflSum / inflN : 0.0;
-        const auto clock = [this]
-        {
-            const int t = juce::roundToInt ((juce::Time::getMillisecondCounterHiRes() - startedAt) / 1000.0);
-            return juce::String (t / 60) + ":" + juce::String (t % 60).paddedLeft ('0', 2);
-        };
-        if (std::abs (err) <= 0.3)
-        {
-            finish ("Reached " + fmtMinus (measured) + " LUFS in " + clock() + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "Inflator Effect "
-                        + juce::String (juce::roundToInt (ctx.param ("infl_effect"))) + "% (" + fmtSigned (inflGain) + " dB)" + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 "))
-                        + "Limiter Drive " + fmtSigned (ctx.param ("lim_drive")) + " dB",
-                    true);
-            return;
-        }
-        if (++attempts > 10)
-        {
-            finish ("Stopped at " + fmtMinus (measured) + " LUFS: the target cannot be reached with these settings.", false);
-            return;
-        }
-        // the Inflator takes up to 40 % of each step while its Effect is below 50 %, the Limiter the rest;
-        // dB per Effect percent from the measured inflate gain (closed loop corrects the estimate)
-        float effect = ctx.param ("infl_effect"), limDrive = ctx.param ("lim_drive");
-        const double perPct = effect > 5.0f && inflGain > 0.05 ? inflGain / effect : 0.04;
-        const float step = (float) err * 0.9f;
-        if (step > 0.0f)
-        {
-            const float room = std::max (0.0f, 50.0f - effect);
-            const float addPct = std::min (room, (float) (step * 0.4 / perPct));
-            const float inflShare = (float) (addPct * perPct);
-            effect += addPct;
-            limDrive = juce::jlimit (0.0f, 24.0f, limDrive + step - inflShare);
-            if (limDrive >= 23.9f && effect >= 49.9f)
+            const double p = ctx.engine.captureProgress();
+            noSignal = p > lastCapture ? 0.0 : noSignal + 0.1;
+            lastCapture = p;
+            status = tr ("Recording the song") + " " + juce::String (juce::roundToInt (p * 12.0)) + " / 12 s";
+            if (p >= 1.0)
             {
-                finish ("Stopped at " + fmtMinus (measured) + " LUFS: Limiter Drive and Inflator Effect are at their maximum.", false);
+                auto rec = ctx.engine.takeCapture();
+                if (rec.getNumSamples() == 0)
+                    return;
+                const double fs = ctx.engine.getSampleRate();
+                const int length = (int) (8.0 * fs), pre = (int) fs;
+                const int win = AutoMatchStrip::loudestWindow (rec, length);
+                const int from = std::max (0, win - pre);
+                const int n = std::min (rec.getNumSamples() - from, length + (win - from));
+                juce::AudioBuffer<float> excerpt (2, n);
+                for (int c = 0; c < 2; ++c)
+                    excerpt.copyFrom (c, 0, rec, std::min (c, rec.getNumChannels() - 1), from, n);
+                automatch::ParamMap current;
+                for (auto* prm : ctx.proc.getParameters())
+                    if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm))
+                        current[rp->paramID] = rp->convertFrom0to1 (rp->getValue());
+                const int threads = (int) std::max (1u, std::thread::hardware_concurrency()) - 2;
+                search = std::make_unique<automatch::LoudnessSearch> (fs, current, std::move (excerpt), win - from, ctx.param ("out_target"), threads);
+                search->startThread (juce::Thread::Priority::low);
+                noSignal = 0.0;
+            }
+            return;
+        }
+        auto& sr = *search;
+        if (! sr.done.load())
+        {
+            if (! sr.isThreadRunning())
+            {
+                search.reset();
+                finish ("Stopped. Undo restores the Inflator and the Limiter.", false);
                 return;
             }
+            const int ev = sr.evals.load(), planned = std::max (1, sr.plannedEvals.load());
+            status = tr ("Trying the loudness stages:") + " " + juce::String (std::min (100, 100 * ev / planned)) + "%";
+            return;
         }
-        else
-        {
-            const float fromLim = std::max (step, -limDrive);
-            limDrive += fromLim;
-            effect = juce::jlimit (0.0f, 100.0f, effect + (float) ((step - fromLim) / perPct));
-        }
-        ctx.setParam ("infl_effect", (float) juce::roundToInt (effect));
-        ctx.setParam ("lim_drive", std::round (limDrive * 10.0f) / 10.0f);
-        status = "Now " + fmtMinus (measured) + " LUFS " + juce::String (juce::CharPointer_UTF8 ("\xe2\x86\x92")) + " target " + fmtMinus (targetLufs) + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 "))
-               + "Inflator Effect " + juce::String (juce::roundToInt (ctx.param ("infl_effect"))) + "%" + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "Limiter Drive " + fmtSigned (ctx.param ("lim_drive")) + " dB";
-        restart();
+        for (const auto& [id, v] : sr.result)
+            ctx.setParam (id, v);
+        const auto r = sr.result;
+        const auto v = [&r] (const char* id) { const auto it = r.find (id); return it != r.end() ? it->second : 0.0f; };
+        juce::String msg = (sr.reached ? "Reached " : "Stopped at ") + fmtMinus (sr.reachedLufs) + " LUFS in " + clock() + dot + "Inflator "
+                         + juce::String (juce::roundToInt (v ("infl_effect"))) + "%" + dot + "Clip " + juce::String (v ("lim_clip"), 1) + " dB" + dot + "Leveler "
+                         + juce::String (juce::roundToInt (v ("lim_leveler"))) + "%" + dot + "Density " + juce::String (juce::roundToInt (v ("lim_density"))) + "%";
+        if (v ("lim_soften") > 0.5f)
+            msg << dot << "Soften " << juce::roundToInt (v ("lim_soften")) << "%";
+        msg << dot << "Drive " << fmtSigned (v ("lim_drive")) << " dB";
+        if (! sr.reached)
+            msg << ". " << tr ("The target cannot be reached cleanly: this is the loudest result.");
+        const bool ok = sr.reached;
+        search.reset();
+        finish (msg, ok);
     }
 
     ValueField target;
@@ -3120,8 +3147,8 @@ private:
     bool reached = false;
     juce::String status;
     std::map<juce::String, float> snapshot;
-    double waited = 0.0, noSignal = 0.0, startedAt = 0.0, inflSum = 0.0;
-    int inflN = 0, attempts = 0;
+    double noSignal = 0.0, startedAt = 0.0, lastCapture = 0.0;
+    std::unique_ptr<automatch::LoudnessSearch> search;
 };
 
 // ---- Stereo (mockup v12) ---------------------------------------------------------------------------------

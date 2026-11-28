@@ -233,7 +233,9 @@ double Limiter::processPipe (Pipe& p, double required, const Coeffs& k) const no
     //    down to this level, so dense music is not pumped and single hits recover quickly.
     if (k.slow)
         p.slowDb = needDb + (needDb > p.slowDb ? k.slowAtt : k.slowRel) * (p.slowDb - needDb);
-    const double envDb = std::max (p.fastDb, k.slow ? p.slowDb : 0.0);
+    // Density (D-042): the fast stage may release up to densityDb below the slow stage, so the space
+    // between hits fills up (louder, denser); 0 keeps the D-036 behaviour
+    const double envDb = std::max (p.fastDb, k.slow ? p.slowDb - k.densityDb : 0.0);
     const double env = envDb > 0.0 ? dbToGain (-envDb) : 1.0;
 
     // 4. look-ahead: minimum over window + 2 samples, so both output samples around an
@@ -246,7 +248,7 @@ void Limiter::prepare (const Context& ctx)
 {
     fs = ctx.sampleRate;
     maxBlock = ctx.maxBlock;
-    maxLookahead = (int) std::ceil (0.005 * fs) + 2;
+    maxLookahead = (int) std::ceil (0.010 * fs) + 2; // up to 10 ms (D-042)
     maxHold = (int) std::ceil (0.03 * fs) + 2;
     for (auto& p : pipes)
         p.prepare (maxHold + 4, maxLookahead + 4);
@@ -272,6 +274,8 @@ void Limiter::prepare (const Context& ctx)
             for (auto& c : *v)
                 c.assign ((size_t) maxBlock, 0.0f);
         tailBypass.prepare (2, clip->latency() + safety->latency() + 8);
+        bandClip = std::make_unique<BandClipper>();
+        bandClip->prepare (fs, maxBlock);
     }
     reset();
 }
@@ -291,6 +295,13 @@ void Limiter::reset()
         tailCount = 0;
     }
     lookahead = std::clamp ((int) std::lround (settings.lookaheadMs * 0.001 * fs), 1, maxLookahead);
+    if (bandClip != nullptr)
+    {
+        bandClip->amountDb = settings.clipDb;
+        bandClip->reset();
+    }
+    levelDb = 0.0;
+    levelMeter.set (0.0f);
     for (auto& d : detector)
         d.reset();
     for (auto& d : delayBuf)
@@ -301,7 +312,7 @@ void Limiter::reset()
     sampleIndex = 0;
     drive.reset (dbToGain (settings.driveDb));
     grMeter.set (0.0f);
-    const int core = lookahead + detector[0].latency();
+    const int core = lookahead + detector[0].latency() + (bandClip != nullptr ? bandClip->latency() : 0);
     latencyCache.store (spectral() ? bank->latency() + core + clip->latency() + safety->latency() : core, std::memory_order_relaxed);
 }
 
@@ -314,11 +325,23 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
 
     drive.setTarget (dbToGain (settings.driveDb), (int) (0.02 * fs));
     float* io[2] = { left, right };
-    if (! spectral() || numSamples > maxBlock)
+    if (nested || bandClip == nullptr || numSamples > maxBlock)
     {
+        coreTransientRelease = true;
         processCore (io, io, io, numSamples, true);
         return;
     }
+    if (! spectral())
+    {
+        // Classic: Drive -> slow first stage -> spectral clipper -> limiter core (D-042)
+        const float inPk = preStages (left, right, numSamples);
+        float* dv[2] = { driven[0].data(), driven[1].data() };
+        coreTransientRelease = true;
+        processCore (dv, dv, io, numSamples, false);
+        inMeter.set ((float) gainToDb (inPk + 1.0e-9));
+        return;
+    }
+    coreTransientRelease = false;
 
     // spectral mode (D-037): Drive -> band stage -> limiter core (listens to the shaped bands, applies
     // the gain to the bands with the attack emphasis) -> clipper -> true-peak safety stage
@@ -341,17 +364,11 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
         tailCount = bank->latency() + lookahead + detector[0].latency() + 64;
     }
     bs.emphasis = tail == Tail::on ? settings.transient : 0.0f;
+    bs.soften = settings.soften;
     bs.link = settings.link;
     bs.mode = settings.mode;
     bs.ceiling = dbToGain (settings.ceilingDb);
-    float inPk = 0.0f;
-    for (int i = 0; i < numSamples; ++i)
-    {
-        const float g = (float) drive.next();
-        driven[0][(size_t) i] = left[i] * g;
-        driven[1][(size_t) i] = right[i] * g;
-        inPk = std::max (inPk, std::max (std::abs (driven[0][(size_t) i]), std::abs (driven[1][(size_t) i])));
-    }
+    const float inPk = preStages (left, right, numSamples);
     bank->process (driven[0].data(), driven[1].data(), shaped[0].data(), shaped[1].data(), full[0].data(), full[1].data(), numSamples);
     float* det[2] = { shaped[0].data(), shaped[1].data() };
     float* app[2] = { full[0].data(), full[1].data() };
@@ -419,6 +436,49 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
     outMeter.set ((float) gainToDb (outPk + 1.0e-9));
 }
 
+float Limiter::preStages (const float* left, const float* right, int numSamples) noexcept
+{
+    float inPk = 0.0f;
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float g = (float) drive.next();
+        driven[0][(size_t) i] = left[i] * g;
+        driven[1][(size_t) i] = right[i] * g;
+        inPk = std::max (inPk, std::max (std::abs (driven[0][(size_t) i]), std::abs (driven[1][(size_t) i])));
+    }
+    // slow first stage (two-stage limiting): takes up to 3 dB of the overshoot with a slow attack
+    // (40 ms) and release (500 ms), so the fast stage works less on dense passages
+    const double lv = std::clamp ((double) settings.leveler, 0.0, 1.0);
+    if (lv > 0.0 || levelDb > 1.0e-4)
+    {
+        constexpr int cb = 32;
+        const double att = std::exp (-cb / (0.04 * fs)), rel = std::exp (-cb / (0.5 * fs));
+        for (int start = 0; start < numSamples; start += cb)
+        {
+            const int end = std::min (numSamples, start + cb);
+            float pk = 0.0f;
+            for (int i = start; i < end; ++i)
+                pk = std::max (pk, std::max (std::abs (driven[0][(size_t) i]), std::abs (driven[1][(size_t) i])));
+            const double over = std::max (0.0, gainToDb (pk + 1.0e-9) - settings.ceilingDb);
+            const double target = lv * std::min (3.0, over);
+            const double from = levelDb;
+            levelDb = target + (target > levelDb ? att : rel) * (levelDb - target);
+            for (int i = start; i < end; ++i)
+            {
+                const double t = (double) (i - start + 1) / (double) (end - start);
+                const float g = (float) dbToGain (-(from + t * (levelDb - from)));
+                driven[0][(size_t) i] *= g;
+                driven[1][(size_t) i] *= g;
+            }
+        }
+    }
+    levelMeter.set ((float) levelDb);
+    // spectral clipper: the loudest peaks of each band lose up to Clip dB before the limiter
+    bandClip->amountDb = settings.clipDb;
+    bandClip->process (driven[0].data(), driven[1].data(), numSamples);
+    return inPk;
+}
+
 void Limiter::processCore (float* const* det, float* const* app, float* const* out, int numSamples, bool applyDrive) noexcept
 {
     // internal target slightly below the ceiling leaves room for the interpolation error
@@ -432,7 +492,7 @@ void Limiter::processCore (float* const* det, float* const* app, float* const* o
     static constexpr double slowRelMs[] = { 900.0, 700.0, 500.0 };
     const int m = std::clamp (settings.mode, 0, 2);
     // in spectral mode Transients is the attack emphasis of the band stage, not a release change
-    const double tr = applyDrive ? std::clamp ((double) settings.transient, 0.0, 1.0) : 0.0;
+    const double tr = coreTransientRelease ? std::clamp ((double) settings.transient, 0.0, 1.0) : 0.0;
     Coeffs k;
     k.holdSamples = std::clamp ((int) std::lround (holdMs[m] * 0.001 * fs), 0, maxHold);
     k.slow = settings.releaseAuto;
@@ -440,6 +500,7 @@ void Limiter::processCore (float* const* det, float* const* app, float* const* o
     k.fastRel = Envelope::coeff (fs, (settings.releaseAuto ? fastMs[m] : (double) settings.releaseMs) * (1.0 - 0.6 * tr));
     k.slowAtt = Envelope::coeff (fs, slowAttMs[m] * (1.0 + 2.0 * tr));
     k.slowRel = Envelope::coeff (fs, slowRelMs[m]);
+    k.densityDb = 12.0 * std::clamp ((double) settings.density, 0.0, 1.0);
     const double link = settings.link;
 
     const int delay = lookahead + TruePeakDetector8::latency();

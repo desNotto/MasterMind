@@ -21,13 +21,14 @@ juce::String timeText (double s)
 /** Columns of the library table (x positions from the right edge). */
 struct Columns
 {
-    int name, length, lufs, analysis, slots, del;
+    int name, length, lufs, analysis, metrics, slots, del;
     static Columns forWidth (int w, bool compact)
     {
         Columns c {};
         c.del = w - 28;
         c.slots = c.del - 6 * 25 - 8;
-        c.analysis = c.slots - (compact ? 40 : 126);
+        c.metrics = c.slots - (compact ? 0 : 92); // metrics region of the song (D-041)
+        c.analysis = c.metrics - (compact ? 40 : 126);
         c.lufs = c.analysis - 70;
         c.length = compact ? c.lufs : c.lufs - 64;
         c.name = 0;
@@ -97,7 +98,30 @@ public:
                 g.drawText (timeText (it.seconds), juce::Rectangle<int> (cols.length, row.getY(), 54, rowH), juce::Justification::centredRight);
             g.drawText (std::isnan (it.lufs) ? juce::String (juce::CharPointer_UTF8 ("\xe2\x80\x93")) : fmtMinus (it.lufs), juce::Rectangle<int> (cols.lufs, row.getY(), 56, rowH), juce::Justification::centredRight);
             // analysis state
-            auto st = juce::Rectangle<int> (cols.analysis + 6, row.getY(), cols.slots - cols.analysis - 10, rowH);
+            if (! owner.compact)
+            {
+                // which part of the song gives the metrics
+                const auto region = owner.ctx.refs.region (it.file);
+                auto mr = juce::Rectangle<int> (cols.metrics, row.getY(), cols.slots - cols.metrics - 8, rowH);
+                if (region.valid())
+                {
+                    const auto clock = [] (double s) { const int t = (int) s; return juce::String (t / 60) + ":" + juce::String (t % 60).paddedLeft ('0', 2); };
+                    const auto text = clock (region.start) + juce::String (juce::CharPointer_UTF8 ("\xe2\x80\x93")) + clock (region.end);
+                    const auto pill = mr.toFloat().withSizeKeepingCentre ((float) mr.getWidth(), 18.0f);
+                    g.setColour (juce::Colour (0xff163152));
+                    g.fillRoundedRectangle (pill, 4.0f);
+                    g.setColour (juce::Colour (0xffcfe3ff));
+                    g.setFont (font (12.0f, true));
+                    g.drawText (owner.ctx.refs.isAnalysingRegion (it.file) ? text + juce::String (juce::CharPointer_UTF8 (" \xe2\x80\xa6")) : text, pill, juce::Justification::centred, true);
+                }
+                else
+                {
+                    g.setColour (col::text3);
+                    g.setFont (font (12.0f));
+                    g.drawText ("whole song", mr, juce::Justification::centredLeft, true);
+                }
+            }
+            auto st = juce::Rectangle<int> (cols.analysis + 6, row.getY(), cols.metrics - cols.analysis - 10, rowH);
             const float p = owner.progressOf (it.file);
             const bool ready = ! std::isnan (it.lufs);
             const auto dotCol = it.failed ? col::bad : (ready ? col::ok : col::warn);
@@ -187,6 +211,8 @@ public:
             for (int k = 0; k < 6; ++k)
                 if (chipRect (cols, row, k).contains (e.position))
                     tip = "c:lib.slot:" + juce::String (k + 1);
+            if (! owner.compact && e.x >= cols.metrics && e.x < cols.slots - 8)
+                tip = "c:lib.region";
             if (playRect (row).contains (e.getPosition()))
                 tip = "t:Listen\nPlays the song through B, without a slot. Press again to pause. Click the waveform of the player to move in the song.";
             if (delRect (cols, row).contains (e.getPosition()))
@@ -706,6 +732,8 @@ void ReferencesView::paint (juce::Graphics& g)
         g.drawText ("Length", tv.getX() + cols.length, y, 54, 30, juce::Justification::centredRight);
     g.drawText ("LUFS-I", tv.getX() + cols.lufs, y, 56, 30, juce::Justification::centredRight);
     g.drawText (compact ? juce::String() : juce::String ("Analysis"), tv.getX() + cols.analysis + 6, y, 90, 30, juce::Justification::centredLeft);
+    if (! compact)
+        g.drawText ("Metrics", tv.getX() + cols.metrics, y, 80, 30, juce::Justification::centredLeft);
     g.drawText ("Assign to slot", tv.getX() + cols.slots, y, 150, 30, juce::Justification::centredLeft);
     g.setColour (col::line);
     g.drawHorizontalLine (tv.getY() - 1, (float) tv.getX(), (float) tv.getRight());

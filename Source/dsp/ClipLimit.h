@@ -2,6 +2,7 @@
 
 #include "dsp/Module.h"
 #include "dsp/Oversampler.h"
+#include "dsp/BandClipper.h"
 #include "dsp/Filters.h"
 #include "dsp/SpectralBank.h"
 #include "dsp/TruePeak.h"
@@ -66,6 +67,11 @@ public:
         float driveDb = 0.0f, ceilingDb = -1.0f, link = 1.0f, transient = 0.0f;
         int bands = 0;             // 0 Classic, 1: 8, 2: 16, 3: 26 bands (D-037, structural)
         float adaptGainDb = 6.0f, adaptSpeed = 0.7f, adaptTrans = 0.5f;
+        // D-042: spectral clipper before the limiter (dB off the band peaks), slow first stage
+        // (0..1: share of up to 3 dB of reduction), transient softening of the bands (0..1)
+        float clipDb = 0.0f, leveler = 0.0f, soften = 0.0f;
+        // density: how far (0..1 of 12 dB) the fast stage may release below the slow stage
+        float density = 0.0f;
     } settings;
 
     void prepare (const Context& ctx) override;
@@ -79,6 +85,9 @@ public:
     bool spectral() const noexcept { return activeBands > 0 && bank != nullptr; }
 
     float gainReductionDb() const noexcept { return grMeter.get(); }
+    /** Spectral clipper peak reduction and slow stage reduction of the last block, dB (>= 0). */
+    float clipReductionDb() const noexcept { return bandClip != nullptr ? bandClip->reductionDb() : 0.0f; }
+    float levelerReductionDb() const noexcept { return levelMeter.get(); }
     /** Peak of the last block in dBFS after Drive (before limiting) and at the output. */
     float inputPeakDb() const noexcept { return inMeter.get(); }
     float outputPeakDb() const noexcept { return outMeter.get(); }
@@ -125,18 +134,24 @@ private:
     struct Coeffs
     {
         int holdSamples = 0;
-        double fastRel = 0.0, slowAtt = 0.0, slowRel = 0.0;
+        double fastRel = 0.0, slowAtt = 0.0, slowRel = 0.0, densityDb = 0.0;
         bool slow = true;
     };
     double processPipe (Pipe& p, double required, const Coeffs& k) const noexcept;
 
     void processCore (float* const* det, float* const* app, float* const* out, int numSamples, bool applyDrive) noexcept;
+    /** Drive, the slow first stage and the spectral clipper into `driven` (D-042). */
+    float preStages (const float* left, const float* right, int numSamples) noexcept;
 
     // spectral mode: band stage, the limiter core, a clipper for the emphasised attacks and a short
     // true-peak safety stage (a nested Limiter in Classic mode)
     std::unique_ptr<SpectralBank> bank;
     std::unique_ptr<Clipper> clip;
     std::unique_ptr<Limiter> safety;
+    std::unique_ptr<BandClipper> bandClip;
+    double levelDb = 0.0;
+    bool coreTransientRelease = true; // Transients shortens the release in Classic only
+    Meter levelMeter;
     std::array<std::vector<float>, 2> driven, shaped, full, proc;
     // The clipper and the safety stage only matter with attack emphasis (Transients > 0). Without it
     // a delay line of the same length replaces them (about half the CPU); switching crossfades.

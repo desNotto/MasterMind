@@ -29,6 +29,8 @@ public:
 private:
     double fractionAt (int x) const;
     void seekTo (double fraction);
+    juce::File currentFile() const;
+    float xOfSeconds (double s) const;
 
     Context& ctx;
     bool compact = false;
@@ -47,5 +49,10 @@ private:
     IconBtn play, restart, close;
     juce::Rectangle<int> infoArea, waveArea;
     double dragFraction = -1.0, hoverFraction = -1.0;
+    // metrics region (mockup v19, D-041): drag over the waveform selects, the edges can be dragged
+    enum class Drag { none, seek, select, startEdge, endEdge } drag = Drag::none;
+    int downX = 0;
+    double selA = 0.0, selB = 0.0; // seconds while dragging
+    juce::Rectangle<float> pillClose;
 };
 } // namespace mm::ui
