@@ -799,10 +799,15 @@ double integratedLufs (const juce::AudioBuffer<float>& b, double fs)
 }
 
 double runLimiter (const juce::AudioBuffer<float>& src, double fs, float drive, int bands, float clip, float leveler, float soften, float look, juce::AudioBuffer<float>& out,
-                   int mode = 1, float adaptGain = 6.0f, float density = 0.0f)
+                   int mode = 1, float adaptGain = 6.0f, float density = 0.0f, float relMs = 0.0f)
 {
     Host h;
     h.set ("lim_on", 1.0f);
+    if (relMs > 0.0f)
+    {
+        h.set ("lim_rel_auto", 0.0f);
+        h.set ("lim_rel", relMs);
+    }
     h.set ("lim_density", density);
     h.set ("lim_mode", (float) mode);
     h.set ("lim_adapt_gain", adaptGain);
@@ -887,18 +892,28 @@ TEST_CASE ("Limiter loudness benchmark (D-042 stages)", "[.bench]")
         int bands;
         float clip, lev, soft, look;
         int mode;
-        float ag, dens;
+        float ag, dens, rel;
     };
-    const V vs[] = { { "26 Balanced", 3, 0, 0, 0, 2, 1, 6, 0 }, { "26 Clip 3", 3, 3, 0, 0, 2, 1, 6, 0 }, { "26 Clip 6", 3, 6, 0, 0, 2, 1, 6, 0 },
-                     { "26 Clip 6 Density 100", 3, 6, 0, 0, 2, 1, 6, 100 }, { "26 Soften 100", 3, 0, 0, 100, 2, 1, 6, 0 },
-                     { "26 all max", 3, 6, 100, 100, 10, 1, 6, 100 } };
+    const V vs[] = { { "Classic Balanced", 0, 0, 0, 0, 2, 1, 6, 0, 0 },     { "26 Balanced", 3, 0, 0, 0, 2, 1, 6, 0, 0 },
+                     { "26 Aggressive AG 12", 3, 0, 0, 0, 2, 2, 12, 0, 0 }, { "26 Aggr AG 12 Clip 6 Dens 100", 3, 6, 0, 0, 2, 2, 12, 100, 0 },
+                     { "26 Aggr AG 12 Clip 9 all", 3, 9, 60, 40, 6, 2, 12, 100, 0 } };
+    // upper bound: +24 dB and a hard clip at -1 dBFS (the loudest anything can be, with heavy distortion)
+    {
+        juce::AudioBuffer<float> c;
+        c.makeCopyOf (mix);
+        const float g = std::pow (10.0f, 24.0f / 20.0f), t = std::pow (10.0f, -1.0f / 20.0f);
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < c.getNumSamples(); ++i)
+                c.setSample (ch, i, std::clamp (c.getSample (ch, i) * g, -t, t));
+        WARN ("hard clip bound: " << integratedLufs (c, fs) << " LUFS");
+    }
     for (const auto& v : vs)
     {
         double lo = 0.0, hi = 24.0, l = 0.0;
         for (int it = 0; it < 9; ++it)
         {
             const double d = 0.5 * (lo + hi);
-            l = runLimiter (mix, fs, (float) d, v.bands, v.clip, v.lev, v.soft, v.look, o, v.mode, v.ag, v.dens);
+            l = runLimiter (mix, fs, (float) d, v.bands, v.clip, v.lev, v.soft, v.look, o, v.mode, v.ag, v.dens, v.rel);
             (l < -7.0 ? lo : hi) = d;
         }
         WARN (v.name << ": Drive " << juce::String (0.5 * (lo + hi), 1) << " dB for " << juce::String (l, 2) << " LUFS, pilot pumping "

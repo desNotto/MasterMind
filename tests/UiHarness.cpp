@@ -2,6 +2,8 @@
 // control leaves the window or overlaps a neighbouring control, and writes PNG snapshots.
 #include "PluginProcessor.h"
 #include "ui/AutoMatch.h"
+#include "ui/EqControls.h"
+#include "state/Parameters.h"
 #include "ui/Locale.h"
 #include "ui/ModuleEditors.h"
 #include "ui/PluginEditor.h"
@@ -225,6 +227,28 @@ int main (int argc, char** argv)
     }
 
     MasterMindProcessor proc;
+    {
+        // EQ band delete (D-043): every band, also after Auto match set it dynamic
+        mm::ui::Context c (proc);
+        int bad = 0;
+        for (int b = 1; b <= 10; ++b)
+        {
+            c.setParam (mm::params::eq (b, "on"), 1.0f);
+            c.setParam (mm::params::eq (b, "gain"), 3.0f);
+            c.setParam (mm::params::eq (b, "dyn"), 1.0f);
+            c.setParam (mm::params::eq (b, "thr"), -10.0f);
+            c.setParam (mm::params::eq (b, "freq"), 333.0f);
+            mm::ui::eqedit::deleteBand (c, b);
+            if (mm::ui::eqedit::bandUsed (c, b))
+            {
+                std::printf ("  eq band %d still used after delete\n", b);
+                ++bad;
+            }
+        }
+        std::printf ("eq delete: %s\n", bad == 0 ? "ok" : "FAILED");
+        if (bad > 0)
+            return 1;
+    }
     proc.setPlayConfigDetails (2, 2, 48000.0, 512);
     proc.prepareToPlay (48000.0, 512);
     // a realistic chain so meters show something

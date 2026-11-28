@@ -140,14 +140,14 @@ TEST_CASE ("Auto match Fast moves the mix towards the reference", "[automatch]")
 TEST_CASE ("Auto match lifts a thin low end gently", "[automatch]")
 {
     // the reference has far more low end: the EQ may lift Sub and Bass by 3 dB at most, the rest
-    // comes from harmonics, the low bands are dynamic and the low end is cleaned (D-041)
+    // comes from harmonics, the low bands stay static and the low end is cleaned (D-041, D-043)
     auto r = runMode (automatch::Mode::fast, 4.5, true);
     INFO ("start " << r.startCost << " end " << r.endCost);
     CHECK (r.result["eq_b1_gain"] <= 3.0f);
     CHECK (r.result["eq_b2_gain"] <= 3.0f);
     CHECK (r.result["lem_tr_amount"] > 0.0f);
-    CHECK (r.result["eq_b1_dyn"] == 1.0f);
-    CHECK (r.result["eq_b1_thr"] < 0.0f);
+    CHECK (r.result["eq_b1_dyn"] == 0.0f); // static: dynamic low bands pumped (D-043)
+    CHECK (r.result["eq_b2_dyn"] == 0.0f);
     CHECK (r.result["hpf_freq"] == 30.0f);
     CHECK (r.result["lem_mono_on"] == 1.0f);
     CHECK (r.endCost < r.startCost);

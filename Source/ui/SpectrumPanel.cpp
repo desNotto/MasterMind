@@ -711,11 +711,9 @@ SpectrumPanel::SpectrumPanel (Context& c, bool comp) : ctx (c), compact (comp)
 {
     plot = std::make_unique<Plot> (ctx, compact);
     addAndMakeVisible (*plot);
-    if (! compact)
-    {
-        bandPanel = std::make_unique<BandFields> (ctx, true);
-        addChildComponent (*bandPanel);
-    }
+    // the floating band panel over the graph was removed (D-043): it covered the curve and moved with
+    // a dynamic band, so its delete cross could not be clicked. The Dyn EQ editor and the right click
+    // on a point edit the band.
     if (compact)
     {
         addAndMakeVisible (modeCompact);

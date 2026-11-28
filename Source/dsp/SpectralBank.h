@@ -74,7 +74,8 @@ private:
     struct GainState
     {
         std::array<double, maxBands> program {}, peak {}, offset {}, fast {}, slow {};
-        std::array<std::array<float, maxBands>, 16> emphDelay {}, softDelay {};
+        std::array<std::array<float, maxBands>, 16> emphDelay {}, softDelay {}, limDelay {};
+        std::array<double, maxBands> lim {}; // fast band limiting, dB (D-043)
         int emphPos = 0;
         std::array<float, maxBands> gShaped {}, gFull {};
     };
@@ -83,7 +84,7 @@ private:
     void runFrame() noexcept;
     void analyse (int ch) noexcept;
     void analyseShort (int ch) noexcept;
-    void computeGains (GainState& st, const float* eLong, const float* eShort, double pressureDb) noexcept;
+    void computeGains (GainState& st, const float* eLong, const float* eShort, double pressureDb, double frameNeedDb) noexcept;
     void buildFilter (const BandSetData& set, const float* gains, float* dest) noexcept;
     void convolve (int ch, const float* filter, float* out) noexcept;
 

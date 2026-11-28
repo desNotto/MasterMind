@@ -153,18 +153,9 @@ ParamMap fixedSetup (const ParamMap& current, double inputLufs)
         p[params::eq (m.band, "dyn")] = 0.0f;
         p[params::eq (m.band, "place")] = 0.0f;
     }
-    // Sub and Bass are dynamic: the boost backs off by up to 3 dB while the low band is loud, so a
-    // kick keeps its weight and long bass notes do not boom. The threshold is set after the neutral
-    // pass (0 dBFS until then: no action).
-    for (int b = 1; b <= 2; ++b)
-    {
-        p[params::eq (b, "dyn")] = 1.0f;
-        p[params::eq (b, "mode")] = 0.0f;
-        p[params::eq (b, "thr")] = 0.0f;
-        p[params::eq (b, "range")] = 3.0f;
-        p[params::eq (b, "att")] = 15.0f;
-        p[params::eq (b, "rel")] = 120.0f;
-    }
+    // every EQ band the match uses is static: dynamic low bands pumped with the kick (D-043)
+    for (const auto& m : bandMap)
+        p[params::eq (m.band, "dyn")] = 0.0f;
     // clean low end: mono below 120 Hz; Translator ready (its amount is a search knob)
     for (auto [id, v] : { std::pair { "lem_on", 1.0f }, { "lem_mono_on", 1.0f }, { "lem_mono_freq", 120.0f }, { "lem_mono_slope", 1.0f },
                           { "lem_mono_amount", 100.0f }, { "lem_tr_on", 1.0f }, { "lem_tr_mix", 50.0f } })
@@ -559,10 +550,6 @@ void Matcher::run()
     if (threadShouldExit())
         return;
     ParamMap fixes;
-    // the dynamic Sub and Bass bands act above the average level of their band
-    for (int b = 0; b < 2; ++b)
-        if (f0.eqLevel[(size_t) b] > -90.0)
-            fixes[params::eq (b + 1, "thr")] = (float) std::clamp (std::round (f0.eqLevel[(size_t) b] + 1.0), -60.0, 0.0);
     if (target.hasHarshness && f0.harshness - target.harshness > 1.5)
         for (auto [id, v] : { std::pair { "rs_on", 1.0f }, { "rs_low", 2000.0f }, { "rs_high", 8000.0f }, { "rs_depth", 4.0f } })
             fixes[id] = v;
@@ -716,6 +703,10 @@ LoudnessSearch::Outcome LoudnessSearch::solve (int worker, const Candidate& c)
     o.p["lim_density"] = c.density;
     o.p["lim_soften"] = c.soften;
     o.p["lim_leveler"] = c.leveler;
+    if (c.mode >= 0)
+        o.p["lim_mode"] = (float) c.mode;
+    if (c.adaptGain >= 0.0f)
+        o.p["lim_adapt_gain"] = c.adaptGain;
     // Drive by the secant method, from the current Drive
     float d = std::clamp (base.count ("lim_drive") > 0 ? base["lim_drive"] : 0.0f, 0.0f, 24.0f);
     double slope = 0.8, lastL = 0.0;
@@ -751,8 +742,12 @@ void LoudnessSearch::run()
         { 20, 3, 0, 0, 50 }, { 20, 6, 0, 0, 50 },  { 0, 3, 50, 0, 50 },  { 20, 3, 50, 0, 50 }, { 40, 3, 0, 0, 50 },
         { 40, 6, 50, 0, 50 },
     };
-    if (bands) // Soften works with the band limiter only
-        for (const Candidate c : { Candidate { 20, 3, 0, 30, 50 }, Candidate { 20, 6, 50, 30, 50 }, Candidate { 0, 6, 50, 30, 50 } })
+    // the loud end (D-043): Aggressive mode, more Clip
+    for (const Candidate c : { Candidate { 20, 6, 50, 0, 50, 2 }, Candidate { 20, 9, 100, 0, 50, 2 }, Candidate { 40, 9, 100, 0, 50, 2 } })
+        cands.push_back (c);
+    if (bands) // Soften and the band Adaptive Gain work with the band limiter only
+        for (const Candidate c : { Candidate { 20, 3, 0, 30, 50 }, Candidate { 20, 6, 50, 30, 50 }, Candidate { 0, 6, 50, 30, 50 },
+                                   Candidate { 20, 6, 50, 30, 50, 2, 12.0f }, Candidate { 20, 9, 100, 40, 60, 2, 12.0f } })
             cands.push_back (c);
     plannedEvals = (int) cands.size() * 3;
     std::vector<Outcome> out (cands.size());
@@ -792,8 +787,10 @@ void LoudnessSearch::run()
     if (best >= 0)
     {
         const auto& o = out[(size_t) best];
-        for (const auto* id : { "clip_on", "lim_on", "lim_ceiling", "infl_effect", "lim_clip", "lim_density", "lim_soften", "lim_leveler", "lim_drive" })
-            result[id] = o.p.at (id);
+        for (const auto* id : { "clip_on", "lim_on", "lim_ceiling", "infl_effect", "lim_clip", "lim_density", "lim_soften", "lim_leveler", "lim_drive",
+                                "lim_mode", "lim_adapt_gain" })
+            if (o.p.count (id) > 0)
+                result[id] = o.p.at (id);
         reachedLufs = o.f.lufs;
         reached = o.ok;
         artefacts = artefactCost (o.f, o.p);

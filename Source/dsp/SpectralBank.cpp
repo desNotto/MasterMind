@@ -257,7 +257,7 @@ void SpectralBank::analyseShort (int ch) noexcept
     }
 }
 
-void SpectralBank::computeGains (GainState& st, const float* el, const float* es, double pressureDb) noexcept
+void SpectralBank::computeGains (GainState& st, const float* el, const float* es, double pressureDb, double frameNeedDb) noexcept
 {
     const auto& set = sets[(size_t) activeSet];
     const int nb = set.bands;
@@ -314,6 +314,23 @@ void SpectralBank::computeGains (GainState& st, const float* el, const float* es
     const double meanExcess = sumE > 0.0 ? sumEX / sumE : 0.0;
     const double meanEmph = sumS > 0.0 ? sumSE / sumS : 0.0;
     const double meanSoft = sumS > 0.0 ? sumSS / sumS : 0.0;
+
+    // fast band limiting (D-043, after Elevate): the overshoot of the newest input frame goes to the
+    // bands that carry it, before the broadband core sees it. A kick lowers the low bands, the guitars
+    // keep their level, and the core only takes the rest. The newest frame reaches the output after
+    // the bank latency, so the reduction is known two frames ahead of its peak (smooth attack).
+    {
+        double maxS = 0.0;
+        for (int b = 0; b < nb; ++b)
+            maxS = std::max (maxS, (double) es[b]);
+        for (int b = 0; b < nb; ++b)
+        {
+            const double dom = maxS > 0.0 ? (double) es[b] / maxS : 0.0;
+            const double weight = std::pow (std::clamp ((dom - 0.2) / 0.8, 0.0, 1.0), 1.5);
+            const double cap = ag * (1.0 + 0.5 * masked[(size_t) b]);
+            st.limDelay[(size_t) st.emphPos][(size_t) b] = (float) (std::min (cap, frameNeedDb) * weight);
+        }
+    }
     const double w = std::clamp (pressureDb / 2.0, 0.0, 1.0); // only near the limit
     const double at = std::clamp ((double) settings.adaptTrans, 0.0, 1.0);
     const int delayFrames = std::clamp ((filterLength / 2 - blockSize) / blockSize, 0, 15);
@@ -331,8 +348,16 @@ void SpectralBank::computeGains (GainState& st, const float* el, const float* es
         const int rd = (st.emphPos - delayFrames + 16) % 16;
         const float e = st.emphDelay[(size_t) rd][(size_t) b];
         const float sd = st.softDelay[(size_t) rd][(size_t) b];
-        // the softening is in both outputs: the limiter core hears the softer attacks
-        st.gShaped[(size_t) b] = (float) std::pow (10.0, (off + sd) / 20.0);
+        // band limiting: the deepest need of this output frame and the two frames after it, then a
+        // release by band (slower low, faster high, faster after hits)
+        double need = 0.0;
+        for (int k = 0; k <= 2; ++k)
+            need = std::max (need, (double) st.limDelay[(size_t) ((st.emphPos - delayFrames + k + 16) % 16)][(size_t) b]);
+        auto& lm = st.lim[(size_t) b];
+        const double limRel = relMul[(size_t) b] * std::clamp (0.08 * std::pow (150.0 / set.fc[(size_t) b], 0.3), 0.03, 0.15);
+        lm = need >= lm ? need : need + coeffFor (frameSec, limRel) * (lm - need);
+        // the softening and the band limiting are in both outputs: the limiter core hears them
+        st.gShaped[(size_t) b] = (float) std::pow (10.0, (off + sd - lm) / 20.0);
         st.gFull[(size_t) b] = st.gShaped[(size_t) b] * (float) std::pow (10.0, e / 20.0);
     }
     st.emphPos = (st.emphPos + 1) % 16;
@@ -405,7 +430,7 @@ void SpectralBank::runFrame() noexcept
             a[(size_t) b] = linked ? maxL : settings.link * maxL + (1.0f - settings.link) * eLong[(size_t) ch][(size_t) b];
             s[(size_t) b] = linked ? maxS : settings.link * maxS + (1.0f - settings.link) * eShort[(size_t) ch][(size_t) b];
         }
-        computeGains (state[(size_t) ch], a.data(), s.data(), pressure);
+        computeGains (state[(size_t) ch], a.data(), s.data(), pressure, need);
         // full = shaped when there is no attack emphasis: copy instead of building
         const auto& gs = state[(size_t) ch].gShaped;
         const auto& gf = state[(size_t) ch].gFull;

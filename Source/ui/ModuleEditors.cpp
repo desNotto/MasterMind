@@ -3012,7 +3012,8 @@ private:
 
     // Reach target with a distortion budget (D-042): 12 s of the song are recorded on the analysis
     // thread, then LoudnessSearch tries the loudness stages on a copy of the chain in the background
-    static constexpr const char* touched[] = { "clip_on", "infl_effect", "lim_on", "lim_drive", "lim_ceiling", "lim_clip", "lim_density", "lim_soften", "lim_leveler" };
+    static constexpr const char* touched[] = { "clip_on", "infl_effect", "lim_on", "lim_drive", "lim_ceiling", "lim_clip", "lim_density", "lim_soften", "lim_leveler",
+                                               "lim_mode", "lim_adapt_gain" };
     void start()
     {
         snapshot.clear();

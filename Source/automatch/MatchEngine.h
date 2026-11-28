@@ -157,6 +157,8 @@ private:
     struct Candidate
     {
         float infl, clip, density, soften, leveler;
+        int mode = -1;          // Limiter mode; -1 keeps the current one
+        float adaptGain = -1.0f; // band Adaptive Gain; -1 keeps the current one
     };
     struct Outcome
     {
