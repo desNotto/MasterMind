@@ -2782,6 +2782,20 @@ public:
             g.drawText ("Bands", r, juce::Justification::centredRight);
         };
         addRight (bandsLabel, 44);
+        // module presets of the Limiter (D-045): they set the character, never Drive and Ceiling
+        presetBox.setTextWhenNothingSelected ("Preset: Custom");
+        for (size_t i = 0; i < limPresets().size(); ++i)
+            presetBox.addItem (juce::String ("Preset: ") + limPresets()[i].name, (int) i + 1);
+        presetBox.onChange = [this]
+        {
+            const int i = presetBox.getSelectedId() - 1;
+            if (i < 0 || i >= (int) limPresets().size())
+                return;
+            for (const auto& [id, v] : limPresets()[(size_t) i].values)
+                ctx.setParam (id, (float) v);
+        };
+        setTip (presetBox, "c:li.preset");
+        addRight (presetBox, 178);
         for (auto* comp : { (juce::Component*) &time, (juce::Component*) &bandView, (juce::Component*) &modes })
             addAndMakeVisible (*comp);
         auto& rel = makeKnob (*this, "lim_rel", "Release", "li.rel", clMag);
@@ -2831,6 +2845,18 @@ public:
                 spectralRow[i]->setAlpha (classic ? 0.45f : 1.0f);
         if (loudRow.size() > 1)
             loudRow[1]->setAlpha (classic ? 0.45f : 1.0f); // Out Clip works with the bands only
+        // the preset list shows the preset whose values match, otherwise "Custom"
+        int match = 0;
+        for (size_t i = 0; i < limPresets().size() && match == 0; ++i)
+        {
+            bool all = true;
+            for (const auto& [id, v] : limPresets()[i].values)
+                all = all && std::abs ((double) ctx.param (id) - v) < 0.05;
+            if (all)
+                match = (int) i + 1;
+        }
+        if (presetBox.getSelectedId() != match)
+            presetBox.setSelectedId (match, juce::dontSendNotification);
         const auto& o = ctx.out();
         modes.footer = "max " + fmtMinus (-time.maxGr()) + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "TP " + fmtLufs (o.truePeak)
                      + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "overs " + juce::String ((juce::int64) o.truePeakOvers);
@@ -2876,6 +2902,30 @@ public:
     std::vector<Knob*> spectralRow, loudRow;
     int separatorX = 0;
     Btn relAuto { "Auto release", true };
+    Dropdown presetBox;
+    struct LimPreset
+    {
+        const char* name;
+        std::vector<std::pair<const char*, double>> values;
+    };
+    /** The character of the limiter; the Loud set was measured against Newfangled Elevate (D-044). */
+    static const std::vector<LimPreset>& limPresets()
+    {
+        static const std::vector<LimPreset> p {
+            { "Clean", { { "lim_bands", 3 }, { "lim_mode", 1 }, { "lim_rel_auto", 1 }, { "lim_lookahead", 2 }, { "lim_transient", 0 }, { "lim_adapt_gain", 6 },
+                         { "lim_adapt_speed", 70 }, { "lim_adapt_trans", 50 }, { "lim_clip", 0 }, { "lim_out_clip", 0 }, { "lim_leveler", 0 },
+                         { "lim_density", 0 }, { "lim_soften", 0 } } },
+            { "Punchy", { { "lim_bands", 3 }, { "lim_mode", 1 }, { "lim_rel_auto", 1 }, { "lim_lookahead", 2 }, { "lim_transient", 30 }, { "lim_adapt_gain", 6 },
+                          { "lim_adapt_speed", 70 }, { "lim_adapt_trans", 50 }, { "lim_clip", 1 }, { "lim_out_clip", 1 }, { "lim_leveler", 0 },
+                          { "lim_density", 50 }, { "lim_soften", 0 } } },
+            { "Loud", { { "lim_bands", 3 }, { "lim_mode", 2 }, { "lim_rel_auto", 1 }, { "lim_lookahead", 2 }, { "lim_transient", 0 }, { "lim_adapt_gain", 12 },
+                        { "lim_adapt_speed", 70 }, { "lim_adapt_trans", 50 }, { "lim_clip", 2 }, { "lim_out_clip", 2 }, { "lim_leveler", 0 },
+                        { "lim_density", 100 }, { "lim_soften", 0 } } },
+            { "Classic", { { "lim_bands", 0 }, { "lim_mode", 1 }, { "lim_rel_auto", 1 }, { "lim_lookahead", 2 }, { "lim_transient", 0 }, { "lim_clip", 0 },
+                           { "lim_out_clip", 0 }, { "lim_leveler", 0 }, { "lim_density", 0 }, { "lim_soften", 0 } } },
+        };
+        return p;
+    }
     Painter* readout = nullptr;
     std::vector<Knob*> row;
 };

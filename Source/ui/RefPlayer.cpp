@@ -74,6 +74,16 @@ RefPlayer::RefPlayer (Context& c)
 
 void RefPlayer::update()
 {
+    // the metrics region of the song in the player also loops the playback (D-045): you hear exactly
+    // the part the analysis and Auto match use
+    const auto region = ctx.refs.region (currentFile());
+    const bool loop = region.valid() && drag == Drag::none;
+    const double a = loop ? region.start : 0.0, b = loop ? region.end : 0.0;
+    if (std::abs (ctx.monitoring.refLoopStart.load() - a) > 1.0e-6 || std::abs (ctx.monitoring.refLoopEnd.load() - b) > 1.0e-6)
+    {
+        ctx.monitoring.refLoopStart = a;
+        ctx.monitoring.refLoopEnd = b;
+    }
     play.repaint();
     repaint();
 }
@@ -275,14 +285,6 @@ void RefPlayer::paint (juce::Graphics& g)
     const int w = waveArea.getWidth();
     const int playX = waveArea.getX() + juce::roundToInt (frac * w);
 
-    // loop region
-    const double la = ctx.monitoring.refLoopStart.load(), lb = ctx.monitoring.refLoopEnd.load();
-    if (len > 0.0 && lb > la + 0.05)
-    {
-        const float x0 = wa.getX() + (float) (la / len) * wa.getWidth(), x1 = wa.getX() + (float) (std::min (lb, len) / len) * wa.getWidth();
-        g.setColour (col::magenta.withAlpha (0.10f));
-        g.fillRect (juce::Rectangle<float> (x0, wa.getY(), x1 - x0, wa.getHeight()));
-    }
 
     for (int x = 0; x < w; ++x)
     {

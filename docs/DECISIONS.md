@@ -367,3 +367,9 @@ The user asked for a batch of changes and approved mockup v18 with "давай �
 Crest factor at -6 LUFS: Elevate 5.0 dB, MasterMind 5.3 dB. THD at +12 dB: 55 Hz both -21 dB; 1 kHz Elevate -34 dB, MasterMind -23 dB. Balanced stays the clean mode (-75 dB on the bass sine).
 
 **Also in this round** (the user's report on 0.7.20): see D-043 for the EQ band panel and the static Auto match EQ.
+
+## D-045 Limiter presets in the module header; the metrics region loops (2026-11-28)
+
+- The user asked to remove the plugin-wide factory preset "Loud Band Limiter" (D-044): it only set the Limiter. It is gone; a "Loud Band Limiter" saved in an old project shows as missing, its values stay.
+- Instead the Limiter header has a preset list (where the user pointed, left of Bands): Clean (26 bands, Balanced, every D-042/D-044 stage off), Punchy (Transients 30, Clip 1, Out Clip 1, Density 50), Loud (the set measured against Elevate: Aggressive, Adaptive Gain 12, Clip 2, Out Clip 2, Density 100), Classic (no bands). A preset sets the character, never Drive or Ceiling. The list shows the preset whose values match, otherwise "Custom". The user placed it on the screenshot, so no separate mockup.
+- The metrics region of the song in the reference player now also loops the playback (the user's request): the player sets the loop of the monitoring section to the region of the song it plays, and clears it without a region. Only the region is analysed for the target (D-041), so what you hear is what the Eyes tab and Auto match compare with.
