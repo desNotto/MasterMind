@@ -17,33 +17,13 @@ std::map<juce::String, float> defaults()
     return m;
 }
 
-std::map<juce::String, float> with (std::initializer_list<std::pair<const char*, double>> changes)
-{
-    auto m = defaults();
-    for (const auto& [id, v] : changes)
-        m[id] = (float) v;
-    return m;
-}
 } // namespace
 
 const std::vector<std::pair<juce::String, std::map<juce::String, float>>>& PresetManager::factoryPresets()
 {
-    // Conservative starting points, not finished masters (spec section 9).
-    // "Tight Modern Metal" and "Wide and Loud" were removed at the user's request (D-027).
+    // Only Init: the user asked to remove every factory preset (D-045, after D-027). User presets stay.
     static const std::vector<std::pair<juce::String, std::map<juce::String, float>>> presets {
         { "Init", defaults() },
-        { "Djent Low-End Focus",
-          with ({ { "hpf_on", 1 }, { "hpf_freq", 32 }, { "hpf_slope", 2 },
-                  { "mb_on", 1 }, { "mb_b1_thr", -26 }, { "mb_b1_ratio", 3 }, { "mb_b1_att", 15 }, { "mb_b1_rel", 120 },
-                  { "lem_on", 1 }, { "lem_mono_freq", 150 }, { "lem_tr_on", 1 }, { "lem_tr_amount", 25 },
-                  { "bus_on", 1 }, { "bus_thr", -16 }, { "bus_ratio", 1 }, { "bus_sc_hpf", 140 },
-                  { "lim_on", 1 }, { "lim_drive", 4 }, { "lim_mode", 1 } }) },
-        { "Gentle Glue",
-          with ({ { "bus_on", 1 }, { "bus_thr", -10 }, { "bus_ratio", 0 }, { "bus_att", 30 }, { "bus_mix", 70 },
-                  { "lim_on", 1 }, { "lim_drive", 2 }, { "lim_mode", 0 } }) },
-        { "Streaming Safe",
-          with ({ { "hpf_on", 1 }, { "hpf_freq", 22 },
-                  { "lim_on", 1 }, { "lim_drive", 2 }, { "lim_ceiling", -1 }, { "lim_mode", 0 } }) },
     };
     return presets;
 }
