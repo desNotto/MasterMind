@@ -198,6 +198,17 @@ if(MM_BUILD_TESTS)
         juce::juce_recommended_config_flags)
     add_dependencies(MasterMindBinaryTest ${MM_PRODUCT_NAME}_VST3)
 
+    # Black-box comparison with another limiter plugin (D-044). Local tool, not run by CTest.
+    juce_add_console_app(MasterMindCompare PRODUCT_NAME "MasterMindCompare")
+    set(MM_COMPARE_SOURCES ${CMAKE_SOURCE_DIR}/tests/CompareLimiters.cpp)
+    mm_strict_sources(${MM_COMPARE_SOURCES})
+    target_sources(MasterMindCompare PRIVATE ${MM_COMPARE_SOURCES})
+    target_compile_definitions(MasterMindCompare PRIVATE ${MM_COMMON_DEFINITIONS} JUCE_PLUGINHOST_VST3=1)
+    target_link_libraries(MasterMindCompare PRIVATE
+        mastermind_core
+        juce::juce_gui_basics
+        juce::juce_recommended_config_flags)
+
     # Layout harness: renders the editor at the spec sizes and checks overlaps (spec section 10).
     juce_add_gui_app(MasterMindUiTest PRODUCT_NAME "MasterMindUiTest")
     set(MM_UI_TEST_SOURCES ${CMAKE_SOURCE_DIR}/tests/UiHarness.cpp)

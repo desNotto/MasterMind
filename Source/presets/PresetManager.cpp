@@ -44,6 +44,11 @@ const std::vector<std::pair<juce::String, std::map<juce::String, float>>>& Prese
         { "Streaming Safe",
           with ({ { "hpf_on", 1 }, { "hpf_freq", 22 },
                   { "lim_on", 1 }, { "lim_drive", 2 }, { "lim_ceiling", -1 }, { "lim_mode", 0 } }) },
+        // the band limiter set measured against Newfangled Elevate (D-044): about the same loudness and
+        // pumping at equal output level; raise the Drive or use Reach target
+        { "Loud Band Limiter",
+          with ({ { "lim_on", 1 }, { "lim_bands", 3 }, { "lim_mode", 2 }, { "lim_adapt_gain", 12 }, { "lim_clip", 2 }, { "lim_out_clip", 2 },
+                  { "lim_density", 100 }, { "lim_drive", 6 }, { "lim_ceiling", -1 } }) },
     };
     return presets;
 }

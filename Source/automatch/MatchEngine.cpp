@@ -707,6 +707,7 @@ LoudnessSearch::Outcome LoudnessSearch::solve (int worker, const Candidate& c)
         o.p["lim_mode"] = (float) c.mode;
     if (c.adaptGain >= 0.0f)
         o.p["lim_adapt_gain"] = c.adaptGain;
+    o.p["lim_out_clip"] = c.outClip;
     // Drive by the secant method, from the current Drive
     float d = std::clamp (base.count ("lim_drive") > 0 ? base["lim_drive"] : 0.0f, 0.0f, 24.0f);
     double slope = 0.8, lastL = 0.0;
@@ -747,7 +748,10 @@ void LoudnessSearch::run()
         cands.push_back (c);
     if (bands) // Soften and the band Adaptive Gain work with the band limiter only
         for (const Candidate c : { Candidate { 20, 3, 0, 30, 50 }, Candidate { 20, 6, 50, 30, 50 }, Candidate { 0, 6, 50, 30, 50 },
-                                   Candidate { 20, 6, 50, 30, 50, 2, 12.0f }, Candidate { 20, 9, 100, 40, 60, 2, 12.0f } })
+                                   Candidate { 20, 6, 50, 30, 50, 2, 12.0f }, Candidate { 20, 9, 100, 40, 60, 2, 12.0f },
+                                   // measured against Elevate (D-044): Clip 2, Output Clip 2, Density 100, Aggressive, AG 12
+                                   Candidate { 0, 2, 100, 0, 0, 2, 12.0f, 2.0f }, Candidate { 20, 2, 100, 0, 0, 2, 12.0f, 2.0f },
+                                   Candidate { 0, 2, 60, 0, 50, 2, 12.0f, 1.0f }, Candidate { 0, 0, 100, 0, 0, 2, 12.0f, 3.0f } })
             cands.push_back (c);
     plannedEvals = (int) cands.size() * 3;
     std::vector<Outcome> out (cands.size());
@@ -788,7 +792,7 @@ void LoudnessSearch::run()
     {
         const auto& o = out[(size_t) best];
         for (const auto* id : { "clip_on", "lim_on", "lim_ceiling", "infl_effect", "lim_clip", "lim_density", "lim_soften", "lim_leveler", "lim_drive",
-                                "lim_mode", "lim_adapt_gain" })
+                                "lim_mode", "lim_adapt_gain", "lim_out_clip" })
             if (o.p.count (id) > 0)
                 result[id] = o.p.at (id);
         reachedLufs = o.f.lufs;

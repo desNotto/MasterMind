@@ -305,3 +305,4 @@ Generated from `Source/state/Parameters.cpp`. The IDs are frozen since M1 (spec 
 | `lim_leveler` | Limiter Leveler | 0% to 100% | 0% | yes |
 | `lim_soften` | Limiter Soften | 0% to 100% | 0% | yes |
 | `lim_density` | Limiter Density | 0% to 100% | 0% | yes |
+| `lim_out_clip` | Limiter Output Clip | 0.0 dB to 6.0 dB | 0.0 dB | yes |

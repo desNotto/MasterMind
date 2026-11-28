@@ -326,8 +326,8 @@ void SpectralBank::computeGains (GainState& st, const float* el, const float* es
         for (int b = 0; b < nb; ++b)
         {
             const double dom = maxS > 0.0 ? (double) es[b] / maxS : 0.0;
-            const double weight = std::pow (std::clamp ((dom - 0.2) / 0.8, 0.0, 1.0), 1.5);
-            const double cap = ag * (1.0 + 0.5 * masked[(size_t) b]);
+            const double weight = std::pow (std::clamp ((dom - 0.1) / 0.9, 0.0, 1.0), 1.0);
+            const double cap = 2.0 * ag * (1.0 + 0.5 * masked[(size_t) b]); // the band limiting may go deeper than the slow offsets
             st.limDelay[(size_t) st.emphPos][(size_t) b] = (float) (std::min (cap, frameNeedDb) * weight);
         }
     }
@@ -354,7 +354,8 @@ void SpectralBank::computeGains (GainState& st, const float* el, const float* es
         for (int k = 0; k <= 2; ++k)
             need = std::max (need, (double) st.limDelay[(size_t) ((st.emphPos - delayFrames + k + 16) % 16)][(size_t) b]);
         auto& lm = st.lim[(size_t) b];
-        const double limRel = relMul[(size_t) b] * std::clamp (0.08 * std::pow (150.0 / set.fc[(size_t) b], 0.3), 0.03, 0.15);
+        static constexpr double modeSpeed[] = { 2.0, 1.0, 0.5 };
+        const double limRel = modeSpeed[std::clamp (settings.mode, 0, 2)] * relMul[(size_t) b] * std::clamp (0.02 * std::pow (1000.0 / set.fc[(size_t) b], 0.5), 0.012, 0.12);
         lm = need >= lm ? need : need + coeffFor (frameSec, limRel) * (lm - need);
         // the softening and the band limiting are in both outputs: the limiter core hears them
         st.gShaped[(size_t) b] = (float) std::pow (10.0, (off + sd - lm) / 20.0);

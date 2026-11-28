@@ -38,6 +38,7 @@ void BandClipper::prepare (double sampleRate, int maxBlock)
         c.residualLp.setSections (lp, 2);
     }
     envRelease = std::exp (-1.0 / (1.5 * rate));
+    msCoeff = std::exp (-1.0 / (0.3 * rate));
     dry.prepare (2, os.latency() + 4);
     work.setSize (2, maxBlock);
     mixStep = 1.0 / (0.02 * fs);
@@ -57,6 +58,7 @@ void BandClipper::reset()
         c.residualLp.reset();
     }
     env.fill (0.0);
+    ms.fill (0.0);
     dry.setDelay (os.latency());
     dry.reset();
     mix = amountDb > 0.01f ? 1.0 : 0.0;
@@ -102,7 +104,12 @@ void BandClipper::process (float* left, float* right, int numSamples) noexcept
             const double pk = std::max (std::abs (b[0][(size_t) k]), std::abs (b[1][(size_t) k]));
             auto& e = env[(size_t) k];
             e = pk > e ? pk : pk + envRelease * (e - pk);
-            const double t = std::max (1.0e-6, e * gain);
+            // only peaks that stand 6 dB above the band's own level are clipped (D-044): a steady
+            // tone (crest 3 dB) passes clean, drum hits lose up to the amount
+            auto& m = ms[(size_t) k];
+            const double x2 = 0.5 * (b[0][(size_t) k] * b[0][(size_t) k] + b[1][(size_t) k] * b[1][(size_t) k]);
+            m = x2 + msCoeff * (m - x2);
+            const double t = std::max ({ 1.0e-6, e * gain, 2.0 * std::sqrt (m) });
             for (int c = 0; c < 2; ++c)
             {
                 const double x = b[(size_t) c][(size_t) k];

@@ -41,8 +41,8 @@ private:
         Cascade residualLp;               // the clipping products above 18 kHz are removed
     };
     std::array<Channel, 2> ch;
-    std::array<double, numBands> env {};
-    double envRelease = 0.0;
+    std::array<double, numBands> env {}, ms {}; // peak envelope and mean square (300 ms) per band
+    double envRelease = 0.0, msCoeff = 0.0;
     DualOversampler os;
     DelayLine dry;
     juce::AudioBuffer<float> work;

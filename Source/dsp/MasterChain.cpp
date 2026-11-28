@@ -39,7 +39,7 @@ struct ParamPtrsImpl
     std::array<SatBand, 3> satb {};
     A stSplit, stMid, stHigh, stBal, stGuard, stGuardThr;
     A inflInput, inflEffect, inflCurve, inflOutput, inflClip, inflSplit;
-    A limLook, limRel, limRelAuto, limMode, limDrive, limCeil, limLink, limTrans, limBands, limAGain, limASpeed, limATrans, limClip, limLevel, limSoft, limDens;
+    A limLook, limRel, limRelAuto, limMode, limDrive, limCeil, limLink, limTrans, limBands, limAGain, limASpeed, limATrans, limClip, limLevel, limSoft, limDens, limOutClip;
     A outGain, outDither, outBits;
 };
 
@@ -163,6 +163,7 @@ ParamPtrsImpl resolve (const params::Raw& r)
     p.limLevel = r.get ("lim_leveler");
     p.limSoft = r.get ("lim_soften");
     p.limDens = r.get ("lim_density");
+    p.limOutClip = r.get ("lim_out_clip");
     p.outGain = r.get ("out_gain");
     p.outDither = r.get ("out_dither");
     p.outBits = r.get ("out_bits");
@@ -372,6 +373,7 @@ void MasterChain::readSettings() noexcept
     li.leveler = v (q.limLevel) * 0.01f;
     li.soften = v (q.limSoft) * 0.01f;
     li.density = v (q.limDens) * 0.01f;
+    li.outClipDb = v (q.limOutClip);
 
     auto& out = outputModule.settings;
     out.gainDb = v (q.outGain);

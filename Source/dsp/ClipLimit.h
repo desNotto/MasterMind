@@ -72,6 +72,9 @@ public:
         float clipDb = 0.0f, leveler = 0.0f, soften = 0.0f;
         // density: how far (0..1 of 12 dB) the fast stage may release below the slow stage
         float density = 0.0f;
+        // output clipper (D-044, after the clipper stage of Elevate): the limiter lets the peaks up to
+        // this many dB over the ceiling, a soft clipper at 4x shaves them back to the ceiling
+        float outClipDb = 0.0f;
     } settings;
 
     void prepare (const Context& ctx) override;

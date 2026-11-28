@@ -350,7 +350,7 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
     bs.adaptSpeed = settings.adaptSpeed;
     bs.adaptTrans = settings.adaptTrans;
     // the attack emphasis is only on while the clipper and the safety stage run (state machine below)
-    const bool wantTail = settings.transient > 1.0e-4f;
+    const bool wantTail = settings.transient > 1.0e-4f || settings.outClipDb > 0.01f;
     if (tail == Tail::off && wantTail)
     {
         clip->reset();
@@ -378,6 +378,9 @@ void Limiter::process (float* left, float* right, int numSamples) noexcept
         std::copy (left, left + numSamples, proc[0].begin());
         std::copy (right, right + numSamples, proc[1].begin());
         clip->settings.thresholdDb = settings.ceilingDb;
+        // soft knee for the output clipper (a wide tanh knee started too early: 1 dB of headroom lost)
+        clip->settings.type = settings.outClipDb > 0.01f ? 2 : 0;
+        clip->settings.shape = 0.5f;
         clip->process (proc[0].data(), proc[1].data(), numSamples);
         safety->settings.ceilingDb = settings.ceilingDb;
         safety->settings.link = settings.link;
@@ -481,9 +484,11 @@ float Limiter::preStages (const float* left, const float* right, int numSamples)
 
 void Limiter::processCore (float* const* det, float* const* app, float* const* out, int numSamples, bool applyDrive) noexcept
 {
-    // internal target slightly below the ceiling leaves room for the interpolation error
-    const double ceiling = dbToGain (settings.ceilingDb - 0.15);
-    const double hardCeiling = dbToGain (settings.ceilingDb);
+    // internal target slightly below the ceiling leaves room for the interpolation error; with the
+    // output clipper (spectral mode) the core aims above the ceiling and the clipper shaves the rest
+    const double over = (spectral() && ! nested) ? std::clamp ((double) settings.outClipDb, 0.0, 6.0) : 0.0;
+    const double ceiling = dbToGain (settings.ceilingDb + over - 0.15);
+    const double hardCeiling = dbToGain (settings.ceilingDb + over);
     // per mode (Transparent, Balanced, Aggressive): hold, fast release, slow attack and release.
     // Every hold is longer than half a period of 40 Hz, so the bass of drop tunings is not modulated.
     static constexpr double holdMs[] = { 25.0, 18.0, 13.0 };
@@ -494,7 +499,10 @@ void Limiter::processCore (float* const* det, float* const* app, float* const* o
     // in spectral mode Transients is the attack emphasis of the band stage, not a release change
     const double tr = coreTransientRelease ? std::clamp ((double) settings.transient, 0.0, 1.0) : 0.0;
     Coeffs k;
-    k.holdSamples = std::clamp ((int) std::lround (holdMs[m] * 0.001 * fs), 0, maxHold);
+    // Density (D-044) also shortens the hold: the gain may follow the waves (like Elevate), which
+    // lowers the crest factor at the cost of some low-frequency distortion
+    const double dens = std::clamp ((double) settings.density, 0.0, 1.0);
+    k.holdSamples = std::clamp ((int) std::lround (holdMs[m] * (1.0 - 0.92 * dens) * 0.001 * fs), 0, maxHold);
     k.slow = settings.releaseAuto;
     // Transients: drum hits pass the slow stage and the fast stage recovers sooner after them
     k.fastRel = Envelope::coeff (fs, (settings.releaseAuto ? fastMs[m] : (double) settings.releaseMs) * (1.0 - 0.6 * tr));

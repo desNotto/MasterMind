@@ -237,6 +237,7 @@ std::vector<Spec> build()
     v.push_back (f ("lim_leveler", "Limiter Leveler", 0.0f, 100.0f, 0.0f, Unit::percent, 0.0f, 1.0f));
     v.push_back (f ("lim_soften", "Limiter Soften", 0.0f, 100.0f, 0.0f, Unit::percent, 0.0f, 1.0f));
     v.push_back (f ("lim_density", "Limiter Density", 0.0f, 100.0f, 0.0f, Unit::percent, 0.0f, 1.0f));
+    v.push_back (f ("lim_out_clip", "Limiter Output Clip", 0.0f, 6.0f, 0.0f, Unit::dB, 0.0f, 0.1f));
 
     return v;
 }

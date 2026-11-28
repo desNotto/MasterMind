@@ -339,3 +339,31 @@ The user asked for a batch of changes and approved mockup v18 with "давай �
 - **Fast band limiting** in the band stage (after Elevate): the overshoot of the newest input frame over the ceiling (known about 40 ms before it reaches the output, because of the bank latency) goes to the bands that carry it: weight ((share of the loudest band - 0.2) / 0.8)^1.5, at most Adaptive Gain (x1.5 when masked) dB; applied at the output frame as the deepest need of that frame and the next two (smooth attack), released per band (80 ms at 150 Hz, scaled by frequency^-0.3, 30-150 ms, faster after hits). It lowers the kick in its bands before the broadband core, so the guitars are ducked less. Measured: 26 bands Balanced at Drive 24 dB -8.6 -> -8.4 LUFS; with Adaptive Gain 12 and Aggressive -7.3.
 - **What limits the loudness, measured**: on the benchmark mix the clean limit is about -7 LUFS. The chord of distorted guitars has a crest factor of 6-7 dB, so a gain that does not change the wave shape cannot bring it closer to the ceiling; Release (auto, 50 ms, 20 ms) changes nothing there. A hard clip at +24 dB reaches -1.3 LUFS: everything louder than about -7 comes from changing the wave shape (clipping, saturation), with distortion. Aggressive + Adaptive Gain 12 + Clip 6 + Density 100 reaches -7 LUFS already at Drive 14 dB with half the pumping of the plain band limiter. This cannot be compared with Elevate here (no Elevate in the tests); the user is asked to compare at equal output loudness.
 - **Reach target** also tries the Aggressive mode, Clip up to 9 dB and (with bands) Adaptive Gain 12; Undo restores them.
+
+## D-044 Black-box comparison with Newfangled Elevate; output clipper; tuned band stage (2026-11-28)
+
+**The user asked** to look at how Elevate works, pointing at its installed .vst3. I declined to decompile it (licence and copyright; MasterMind is GPL) and proposed a black-box comparison; the user agreed.
+
+**Tool**: `tests/CompareLimiters.cpp` (target `MasterMindCompare`, local only, not in CTest). It loads a VST3 like a host, lists its parameters (what any host shows), and drives both limiters with the same signals: the dense metal-like mix with a quiet 2 kHz pilot tone, a 55 Hz and a 1 kHz sine. For each, the gain is found by bisection for -9, -8, -7 and -6 LUFS; it reports the gain, the pilot pumping (level variation in 20 ms windows), the crest factor and the true peak, and the THD of the sines 12 dB into limiting. Elevate 1.14 ran with Match Level off (on by default: it matches the output level to the input), Ceiling -1.0, True Peak on.
+
+**What the measurements showed about Elevate**: it is not "louder without distortion". It reaches -6 LUFS at +11.3 dB with 0.77 dB of pilot pumping and a crest factor of 5.0 dB, and it distorts a 55 Hz sine at +12 dB to -21 dB THD (about 9 %) and a 1 kHz sine to -34 dB. It lowers the crest factor (it changes the wave shape), its bands follow the peaks fast, and its output has a clipper (parameters Clipper Drive and Shape). Its band centres are Mel-spaced from 0 Hz (0, 102, 218, 351 Hz ...), so the low end is two bands.
+
+**Changes, each measured with the tool**:
+- `lim_out_clip` (0-6 dB, band modes): the core aims that many dB above the ceiling and a soft-knee clipper at 4x shaves the peaks back; the true-peak safety stage follows. A wide tanh knee was worse (it started early and lost 1 dB of headroom).
+- The spectral clipper (`lim_clip`) clips only peaks that stand more than 6 dB above the band's own mean-square level (300 ms): a steady tone passes clean, drum hits lose up to the amount. Bass THD with Clip 2 dB: -16 -> -21 dB.
+- Density (`lim_density`) also shortens the hold of the core, by up to 92 %: the gain may follow the waves, which lowers the crest factor (bass THD at Density 100 %: -37 dB).
+- Fast band limiting: release by band 0.02 s x (1 kHz / f)^0.5 within 12-120 ms, x2 Transparent, x0.5 Aggressive, faster after hits; the band weight ((share - 0.1) / 0.9), cap 2 x Adaptive Gain. Broader weights (from 0.05, square root) pumped less but let a kick reach -0.93 dBTP in the ceiling test, so they were not kept.
+- Factory preset **Loud Band Limiter**: 26 bands, Aggressive, Adaptive Gain 12, Clip 2, Out Clip 2, Density 100, Drive 6. Reach target also tries this set (with and without Inflator, and with Out Clip 1 and 3).
+
+**Result** (same signals, same output loudness; gain = Elevate Gain or our Drive):
+
+| LUFS | Elevate gain / pumping | MasterMind Loud Band Limiter gain / pumping | MasterMind 26 Balanced |
+| --- | --- | --- | --- |
+| -9 | 6.5 / 0.38 dB | 7.2 / 0.40 dB | 9.3 / 1.20 dB |
+| -8 | 8.0 / 0.45 dB | 8.7 / 0.49 dB | max -8.3 at 24 dB, 1.87 dB |
+| -7 | 9.4 / 0.56 dB | 10.3 / 0.64 dB | not reached |
+| -6 | 11.3 / 0.77 dB | 12.3 / 0.85 dB | not reached |
+
+Crest factor at -6 LUFS: Elevate 5.0 dB, MasterMind 5.3 dB. THD at +12 dB: 55 Hz both -21 dB; 1 kHz Elevate -34 dB, MasterMind -23 dB. Balanced stays the clean mode (-75 dB on the bass sine).
+
+**Also in this round** (the user's report on 0.7.20): see D-043 for the EQ band panel and the static Auto match EQ.

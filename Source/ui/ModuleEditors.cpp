@@ -2790,11 +2790,17 @@ public:
         row = { &makeKnob (*this, "lim_drive", "Drive", "li.drive", clMag), &makeKnob (*this, "lim_ceiling", "Ceiling", "li.ceil", clMag), &rel,
                 &makeKnob (*this, "lim_lookahead", "Lookahead", "li.la", clMag), &makeKnob (*this, "lim_link", "Link", "li.link", clMag) };
         // the loudness stages (D-042): spectral clipper, slow first stage, density
-        for (auto [id, label, tip] : { std::tuple { "lim_clip", "Clip", "li.clip" }, { "lim_leveler", "Leveler", "li.lev" }, { "lim_density", "Density", "li.dens" } })
+        for (auto [id, label, tip] : { std::tuple { "lim_clip", "Clip", "li.clip" }, { "lim_out_clip", "Out Clip", "li.oclip" }, { "lim_leveler", "Leveler", "li.lev" },
+                                       { "lim_density", "Density", "li.dens" } })
         {
             auto& k = makeKnob (*this, id, label, tip, clMag);
-            if (juce::String (id) != "lim_clip")
+            if (juce::String (id) == "lim_leveler" || juce::String (id) == "lim_density")
                 k.valueStep = 1.0f;
+            if (juce::String (id) == "lim_out_clip")
+                k.textOverride = [this, &k]
+                {
+                    return ctx.param ("lim_bands") < 0.5f ? juce::String ("off") : ctx.apvts.getParameter (k.getParamId())->getCurrentValueAsText();
+                };
             loudRow.push_back (&k);
         }
         // the band knobs (D-037, Soften D-042); in Classic they show "off"
@@ -2823,6 +2829,8 @@ public:
         for (size_t i = 0; i < spectralRow.size(); ++i)
             if (i != 2)
                 spectralRow[i]->setAlpha (classic ? 0.45f : 1.0f);
+        if (loudRow.size() > 1)
+            loudRow[1]->setAlpha (classic ? 0.45f : 1.0f); // Out Clip works with the bands only
         const auto& o = ctx.out();
         modes.footer = "max " + fmtMinus (-time.maxGr()) + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "TP " + fmtLufs (o.truePeak)
                      + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + "overs " + juce::String ((juce::int64) o.truePeakOvers);
@@ -3013,7 +3021,7 @@ private:
     // Reach target with a distortion budget (D-042): 12 s of the song are recorded on the analysis
     // thread, then LoudnessSearch tries the loudness stages on a copy of the chain in the background
     static constexpr const char* touched[] = { "clip_on", "infl_effect", "lim_on", "lim_drive", "lim_ceiling", "lim_clip", "lim_density", "lim_soften", "lim_leveler",
-                                               "lim_mode", "lim_adapt_gain" };
+                                               "lim_mode", "lim_adapt_gain", "lim_out_clip" };
     void start()
     {
         snapshot.clear();

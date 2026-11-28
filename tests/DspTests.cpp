@@ -366,6 +366,8 @@ TEST_CASE ("Limiter true peak stays at or below the ceiling + 0.05 dB with +24 d
                 h.set ("lim_clip", 6.0f);
                 h.set ("lim_leveler", 100.0f);
                 h.set ("lim_soften", variant == 8 ? 100.0f : 0.0f);
+                h.set ("lim_out_clip", variant == 8 ? 6.0f : 0.0f);
+                h.set ("lim_density", variant == 8 ? 100.0f : 0.0f);
                 h.set ("lim_lookahead", 10.0f);
             }
             h.chain.prepare (fs, 512, false);
