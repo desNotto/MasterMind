@@ -6,6 +6,7 @@ Every visual change starts here (see `CLAUDE.md`, "Visual changes: mockup first"
 
 | Version | Date | Status | What changed |
 | --- | --- | --- | --- |
+| [m1-main-window-v17](m1-main-window-v17-2026-11-28/) | 2026-11-28 | Proposed | v16 plus: the Inflator replaces the Clipper (D-038): waveform before and after, transfer curve with Curve -50 and +50 for comparison, added odd harmonics and the inflate meter, Clip 0 dB and Band split; Output Reach target uses the Limiter only (`ifcurve`, `ifeff`, `ifsplit=1`) |
 | [m1-main-window-v16](m1-main-window-v16-2026-11-28/) | 2026-11-28 | Proposed | v15 plus: spectral Limiter (D-037): Bands selector (Classic, 8, 16, 26), a band panel with the gain reduction and the attack emphasis of every band, Adaptive Gain, Adaptive Speed and Adaptive Trans knobs; the GR maximum, true peak and overs move under the mode list (`libands=1|8|16|26`). The D-036 changes (reference player, grey Bypass, no MONITOR ON badge) are not drawn in this mockup |
 | [m1-main-window-v15](m1-main-window-v15-2026-11-27/) | 2026-11-27 | Approved 2026-11-27, implemented in 0.7 | v14 plus: graphical Limiter (level over the last 6 s with the gain reduction strip and the ceiling, GR and true-peak meters, modes with pictures) |
 | [m1-main-window-v14](m1-main-window-v14-2026-11-27/) | 2026-11-27 | Included in v15 | v13 plus: Clipper with Drive (up to +24 dB), waveform before and after with the cut peaks, transfer curve, modes with pictures; Output with a loudness target that sets the Clipper and the Limiter (`outrun=run|done`) |

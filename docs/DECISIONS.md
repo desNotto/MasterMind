@@ -235,3 +235,17 @@ The user asked to rebuild the per-band ("pinpoint") behaviour of Newfangled Audi
 **Deviation from the spec**: with the defaults the plugin latency grows from 270 samples to about 2,900 samples at 48 kHz (spec section 10 quotes 270). Classic restores the old latency.
 
 **Tests planned**: perfect reconstruction of the filter bank (bands sum to the delayed input within -100 dB); the ceiling test with every band count; the D-036 THD and IMD tests; a pinpoint test: a 60 Hz kick burst plus a steady 1 kHz tone, the 1 kHz tone is pumped at least 3 dB less with Adaptive Gain 6 dB than with 0 dB; CPU at 26 bands reported.
+
+## D-038 Inflator replaces the Clipper (proposed, mockup v17, 2026-11-28)
+
+The user asked to replace the Clipper module with an Inflator after the open-source JS Inflator (https://github.com/Kiriki-liszt/JS_Inflator, GPL-3.0, itself a recreation of the Sonnox Inflator curve).
+
+**How JS Inflator works** (read from its source): Input gain (-12 to +12 dB), optional clip to +-1 (0 dBFS) before and after the curve, an odd-symmetric polynomial on |x| with a Curve parameter c in -0.5..+0.5: y = A|x| + B|x|^2 + C|x|^3 - D(|x|^2 - 2|x|^3 + |x|^4) with A = 1.5 + c, B = -2c, C = c - 0.5, D = 0.0625 - c/4 + c^2/4 for |x| <= 1 (unity gain at 0 and at 1, so quiet parts rise more than peaks and only odd harmonics are added); above 1 the curve folds back (2|x| - |x|^2), which is why the clip option exists. Effect mixes dry and curve output (0 to 100 %), Output -12 to 0 dB. Optional Band split: three bands at 240 Hz and 2.4 kHz through the curve separately. Oversampling 1x to 8x.
+
+**Our module** (slot 7, between Stereo and Limiter, where the Clipper was): Input, Effect, Curve, Output, Clip 0 dB, Band split (complementary split at 240 Hz and 2.4 kHz, sum equal to the input), oversampled by the Quality setting (4x normal, 8x high) with the Clipper's oversampler, so the plugin latency does not change. The editor shows the waveform before and after, the transfer curve with the current Effect, the odd harmonics of a sine at the current level and the loudness the module adds (RMS after minus before).
+
+**Parameters**: the `clip_*` IDs stay in the parameter list so old projects load, but they no longer act; `clip_on` stays the module switch and is renamed "Inflator On". New, appended: `infl_input` (-6 to +12 dB, 0), `infl_effect` (0 to 100 %, 30), `infl_curve` (-50 to +50, 0), `infl_output` (-12 to 0 dB, 0), `infl_clip` (on), `infl_split` (off).
+
+**Other modules**: Output Reach target moves only the Limiter Drive (the Inflator stays as set). Auto match replaces its Clipper step: when the mix is more dynamic than the reference (crest factor), it raises Inflator Effect up to 50 %.
+
+**Licence (open question to the user)**: copying the GPL-3.0 code would make MasterMind GPL-3.0 as a whole. The alternative is our own implementation of the published curve formula with credit in the docs, without copying code.
