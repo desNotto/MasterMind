@@ -1,5 +1,7 @@
 #pragma once
 
+#include <map>
+
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <atomic>
@@ -59,6 +61,11 @@ const Spec* find (const juce::String& id);
 
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
+/** D-047: a project or preset from the three-band Saturation (no sat_b4_* values) gets six bands:
+    each new band takes the settings of the old band that contains its centre (old crossovers
+    sat_xo1_freq and sat_xo2_freq). Returns true when something was migrated. */
+bool migrateSaturation (std::map<juce::String, float>& values);
+
 /** Text for a parameter value with its unit, as shown in the UI ("4.80 kHz", "-2.5 dB"). */
 juce::String formatValue (const Spec& spec, float value);
 
@@ -70,7 +77,9 @@ inline juce::String sat (int band, const char* field) { return "sat_b" + juce::S
 
 inline constexpr int eqBands = 10;
 inline constexpr int mbBands = 5;
-inline constexpr int satBands = 3;
+inline constexpr int satBands = 6;   // D-047: Sub, Bass, Low-mid, Mid, Presence, Air
+inline constexpr int satBandsV1 = 3; // the first three IDs, in their original place in the list
+inline const char* const satBandNames[satBands] = { "Sub", "Bass", "Low-mid", "Mid", "Presence", "Air" };
 
 // Choice lists (indices are part of the frozen format)
 namespace choice

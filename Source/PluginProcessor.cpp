@@ -7,7 +7,7 @@ namespace
 {
 const juce::Identifier stateType { "MasterMindState" };
 const juce::Identifier stateVersionKey { "stateVersion" };
-constexpr int stateVersion = 1;
+constexpr int stateVersion = 2; // 2: six-band Saturation (D-047)
 } // namespace
 
 /** Background worker: rebuilds linear-phase kernels and keeps the reported latency current. */
@@ -256,7 +256,28 @@ void MasterMindProcessor::setStateInformation (const void* data, int sizeInBytes
     if (! state.isValid())
         return;
 
-    // Version 1 is the first format with parameters; future versions migrate here.
+    // Version 1 is the first format with parameters; version 2 has the six-band Saturation (D-047).
+    if ((int) state.getProperty (stateVersionKey, 1) < 2)
+    {
+        std::map<juce::String, float> values;
+        for (const auto& c : state)
+            if (c.hasType ("PARAM"))
+                values[c.getProperty ("id").toString()] = (float) (double) c.getProperty ("value");
+        if (mm::params::migrateSaturation (values))
+            for (int b = 1; b <= mm::params::satBands; ++b)
+                for (const auto* f : { "drive", "type", "bias", "mix", "out", "solo", "mute" })
+                {
+                    const auto id = mm::params::sat (b, f);
+                    auto node = state.getChildWithProperty ("id", id);
+                    if (! node.isValid())
+                    {
+                        node = juce::ValueTree ("PARAM");
+                        node.setProperty ("id", id, nullptr);
+                        state.appendChild (node, nullptr);
+                    }
+                    node.setProperty ("value", values[id], nullptr);
+                }
+    }
     const auto extra = state.getChildWithName ("Extra");
     if (extra.isValid())
     {

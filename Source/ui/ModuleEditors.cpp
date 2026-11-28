@@ -18,7 +18,9 @@ namespace
 {
 constexpr int headH = 32;
 constexpr int knobH = 64;
-const juce::Colour satColours[3] = { juce::Colour (0xff4fc6e0), juce::Colour (0xffff9f43), juce::Colour (0xffb78cff) };
+// six Saturation bands (mockup v21, D-047)
+const juce::Colour satColours[6] = { juce::Colour (0xff4ea1ff), juce::Colour (0xff4fc6e0), juce::Colour (0xff3ecf8e),
+                                     juce::Colour (0xffff9f43), juce::Colour (0xffe35bd8), juce::Colour (0xffb78cff) };
 
 float noSignal() { return std::numeric_limits<float>::quiet_NaN(); }
 
@@ -290,7 +292,7 @@ public:
             case 5:
             {
                 float m = 0.0f;
-                for (int b = 1; b <= 3; ++b)
+                for (int b = 1; b <= params::satBands; ++b)
                     m = std::max (m, ctx.param (params::sat (b, "drive")));
                 prefix = "Max";
                 value = juce::String (m, 1) + " dB";
@@ -1170,19 +1172,16 @@ public:
             g.setColour (col::text3);
             g.drawText (f >= 1000.0 ? juce::String ((int) (f / 1000.0)) + "k" : juce::String ((int) f), juce::Rectangle<float> (x + 3, pb, 30, 14), juce::Justification::centredLeft);
         }
-        const float edges[4] = { 20.0f, ctx.param ("sat_xo1_freq"), ctx.param ("sat_xo2_freq"), 20000.0f };
         const auto& snap = ctx.snap;
         const auto& spec = snap.out.specRt;
-        static const char* names[] = { "Low", "Mid", "High" };
-        static const char* types[] = { "Tube", "Tape", "Transformer", "Diode" };
-        for (int b = 0; b < 3; ++b)
+        for (int b = 0; b < params::satBands; ++b)
         {
             const float x0 = xOf (edges[b]), x1 = xOf (edges[b + 1]);
             const auto c = satColours[b];
             g.setColour (c.withAlpha (0.05f));
             g.fillRect (juce::Rectangle<float> (x0, 0.0f, x1 - x0, pb));
             bool anySolo = false;
-            for (int i = 1; i <= 3; ++i)
+            for (int i = 1; i <= params::satBands; ++i)
                 anySolo = anySolo || ctx.param (params::sat (i, "solo")) >= 0.5f;
             const bool muted = ctx.param (params::sat (b + 1, "mute")) >= 0.5f, silent = muted || (anySolo && ctx.param (params::sat (b + 1, "solo")) < 0.5f);
             if (silent)
@@ -1195,7 +1194,7 @@ public:
                 g.restoreState();
                 g.setColour (col::text2);
                 g.setFont (font (11.0f, true));
-                g.drawText (muted ? "MUTED" : "SOLO OFF", juce::Rectangle<float> (x1 - 76.0f, 2.0f, 72.0f, 14.0f), juce::Justification::centredRight);
+                g.drawText (muted ? "M" : "S", juce::Rectangle<float> (x1 - 20.0f, 2.0f, 16.0f, 14.0f), juce::Justification::centredRight);
             }
             if (! spec.empty() && spec.size() == snap.freqs.size())
             {
@@ -1237,8 +1236,7 @@ public:
             g.fillEllipse (cx - 6, y - 6, 12, 12);
             g.setColour (col::sunk);
             g.drawEllipse (cx - 6, y - 6, 12, 12, 2.0f);
-            const auto label = juce::String (names[b]) + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + types[juce::jlimit (0, 3, juce::roundToInt (ctx.param (params::sat (b + 1, "type"))))]
-                               + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + juce::String (d, 1) + " dB";
+            const auto label = juce::String (d, 1) + " dB"; // six bands: the drive only (mockup v21)
             const float lw = juce::GlyphArrangement::getStringWidth (font (11.5f, true), label) + 14.0f;
             auto pill = juce::Rectangle<float> (cx - lw / 2, y - 25, lw, 17).constrainedWithin (juce::Rectangle<float> (x0 + 2, 0, x1 - x0 - 4, pb));
             g.setColour (col::sunk);
@@ -1248,35 +1246,21 @@ public:
             g.setFont (font (11.5f, true));
             g.drawText (label, pill, juce::Justification::centred, true);
         }
-        for (int i = 1; i <= 2; ++i)
-        {
-            const float x = xOf (edges[i]);
-            g.setColour (col::yellow);
-            g.fillRect (x - 1.0f, 0.0f, 2.0f, pb);
-            const auto t = hzText (edges[i]);
-            const float w = juce::GlyphArrangement::getStringWidth (font (11.5f, true), t) + 12.0f;
-            const juce::Rectangle<float> pill (x - w / 2, pb - 18, w, 16);
-            g.fillRoundedRectangle (pill, 4.0f);
-            g.setColour (juce::Colour (0xff1b1600));
-            g.setFont (font (11.5f, true));
-            g.drawText (t, pill, juce::Justification::centred);
-        }
+        // fixed crossovers at the tonal balance limits (D-047): thin dashed lines
+        const float dash[] = { 3.0f, 3.0f };
+        g.setColour (juce::Colour (0xff3a414d));
+        for (int i = 1; i < params::satBands; ++i)
+            g.drawDashedLine (juce::Line<float> (xOf (edges[i]), 0.0f, xOf (edges[i]), pb), dash, 2, 1.0f);
         g.setColour (col::line);
         g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
     }
 
+    static constexpr float edges[params::satBands + 1] = { 20.0f, 60.0f, 150.0f, 500.0f, 2000.0f, 6000.0f, 20000.0f };
     int hit (juce::Point<float> p, bool& isXo) const
     {
-        const float e1 = xOf (ctx.param ("sat_xo1_freq")), e2 = xOf (ctx.param ("sat_xo2_freq"));
-        isXo = true;
-        if (std::abs (p.x - e1) < 6.0f)
-            return 1;
-        if (std::abs (p.x - e2) < 6.0f)
-            return 2;
-        isXo = false;
-        const float edges[4] = { 0.0f, e1, e2, (float) getWidth() };
-        for (int b = 0; b < 3; ++b)
-            if (p.x > edges[b] && p.x < edges[b + 1] && std::abs (p.y - yDrive (ctx.param (params::sat (b + 1, "drive")))) < 9.0f)
+        isXo = false; // the crossovers are fixed (D-047)
+        for (int b = 0; b < params::satBands; ++b)
+            if (p.x > xOf (edges[b]) && p.x < xOf (edges[b + 1]) && std::abs (p.y - yDrive (ctx.param (params::sat (b + 1, "drive")))) < 9.0f)
                 return b + 1;
         return 0;
     }
@@ -1292,17 +1276,13 @@ public:
         if (dragIndex > 0)
             ctx.apvts.getParameter (id())->beginChangeGesture();
     }
-    juce::String id() const { return dragXo ? "sat_xo" + juce::String (dragIndex) + "_freq" : params::sat (dragIndex, "drive"); }
+    juce::String id() const { return params::sat (dragIndex, "drive"); }
     void mouseDrag (const juce::MouseEvent& e) override
     {
         if (dragIndex <= 0)
             return;
         auto* p = ctx.apvts.getParameter (id());
-        float v;
-        if (dragXo)
-            v = (float) (dragIndex == 1 ? juce::jlimit (60.0, 500.0, fOf (e.position.x)) : juce::jlimit (1000.0, 10000.0, fOf (e.position.x)));
-        else
-            v = juce::jlimit (0.0f, 24.0f, std::round ((plotBottom() - 4.0f - e.position.y) / (plotBottom() - 26.0f) * 48.0f) / 2.0f);
+        const float v = juce::jlimit (0.0f, 24.0f, std::round ((plotBottom() - 4.0f - e.position.y) / (plotBottom() - 26.0f) * 48.0f) / 2.0f);
         p->setValueNotifyingHost (p->convertTo0to1 (v));
         repaint();
     }
@@ -1382,70 +1362,33 @@ public:
     float level = 0.0f;
 };
 
-class TypeList final : public juce::Component
-{
-public:
-    TypeList (Context& c, int b) : ctx (c), band (b)
-    {
-        setTip (*this, "c:sat.type");
-        setMouseCursor (juce::MouseCursor::PointingHandCursor);
-    }
-    void paint (juce::Graphics& g) override
-    {
-        static const char* types[] = { "Tube", "Tape", "Transformer", "Diode" };
-        const int sel = juce::roundToInt (ctx.param (params::sat (band, "type")));
-        const float rh = getHeight() / 4.0f;
-        for (int i = 0; i < 4; ++i)
-        {
-            const juce::Rectangle<float> row (0.0f, i * rh + 1.0f, (float) getWidth(), rh - 2.0f);
-            const bool on = i == sel;
-            if (on)
-            {
-                g.setColour (juce::Colours::white.withAlpha (0.05f));
-                g.fillRoundedRectangle (row, 4.0f);
-            }
-            const auto dot = juce::Rectangle<float> (row.getX() + 6, row.getCentreY() - 4.5f, 9, 9);
-            g.setColour (on ? satColours[band - 1] : juce::Colour (0xff4a515d));
-            if (on)
-                g.fillEllipse (dot);
-            else
-                g.drawEllipse (dot, 1.5f);
-            g.setColour (on ? juce::Colours::white : col::text3);
-            g.setFont (font (12.5f, on));
-            g.drawText (types[i], row.withTrimmedLeft (22), juce::Justification::centredLeft, true);
-        }
-    }
-    void mouseDown (const juce::MouseEvent& e) override
-    {
-        const int i = juce::jlimit (0, 3, (int) (e.position.y / (getHeight() / 4.0f)));
-        ctx.setParam (params::sat (band, "type"), (float) i);
-        repaint();
-    }
-    Context& ctx;
-    int band;
-};
-
+/** One Saturation band as a compact column (mockup v21, D-047): name and range with S and M, the
+    transfer curve and Drive, the type list, then Asymmetry, Mix and Output. In the compact window
+    the selected band is one horizontal row. */
 class SatCard final : public juce::Component
 {
 public:
     SatCard (Context& c, int b, std::function<Knob& (juce::Component&, const juce::String&, const juce::String&, const juce::String&, juce::Colour, bool)> mk)
-        : ctx (c), band (b), curve (c, b), types (c, b)
+        : ctx (c), band (b), curve (c, b)
     {
         addAndMakeVisible (curve);
-        addAndMakeVisible (types);
+        type.attach (ctx.apvts, params::sat (b, "type"));
+        setTip (type, "c:sat.type");
+        addAndMakeVisible (type);
         const auto colour = satColours[b - 1];
         drive = &mk (*this, params::sat (b, "drive"), "Drive", "sat.drive", colour, false);
-        drive->setDialSize (44.0f);
-        drive->getProperties().set ("w", 66);
-        asym = &mk (*this, params::sat (b, "bias"), "Asymmetry", "sat.asym", colour, false);
+        drive->setDialSize (26.0f);
+        asym = &mk (*this, params::sat (b, "bias"), "Asym", "sat.asym", colour, false);
+        mix = &mk (*this, params::sat (b, "mix"), "Mix", "sat.mix", colour, false);
+        out = &mk (*this, params::sat (b, "out"), "Out", "sat.out", colour, true);
+        for (auto* k : { asym, mix, out })
+            k->setDialSize (22.0f);
         for (auto [btn, field, tip] : { std::tuple { &solo, "solo", "c:sat.solo" }, { &mute, "mute", "c:sat.mute" } })
         {
             btn->attach (ctx.apvts, params::sat (b, field));
             setTip (*btn, tip);
             addAndMakeVisible (*btn);
         }
-        mix = &mk (*this, params::sat (b, "mix"), "Mix", "sat.mix", colour, false);
-        out = &mk (*this, params::sat (b, "out"), "Output", "sat.out", colour, true);
     }
     void paint (juce::Graphics& g) override
     {
@@ -1459,34 +1402,26 @@ public:
         g.fillRoundedRectangle (r.removeFromTop (3.0f).reduced (4.0f, 0.0f), 1.5f);
         if (horizontal)
             return;
-        static const char* names[] = { "Low", "Mid", "High" };
+        static const char* ranges[] = { "20\xe2\x80\x93" "60 Hz", "60\xe2\x80\x93" "150 Hz", "150\xe2\x80\x93" "500 Hz", "0.5\xe2\x80\x93" "2 kHz", "2\xe2\x80\x93" "6 kHz", "6\xe2\x80\x93" "16 kHz" };
         auto h = headArea;
-        g.setFont (semibold (13.5f));
-        const int nw = juce::roundToInt (juce::GlyphArrangement::getStringWidth (semibold (13.5f), names[band - 1])) + 6;
-        g.drawText (names[band - 1], h.removeFromLeft (nw), juce::Justification::centredLeft);
-        const float x1 = ctx.param ("sat_xo1_freq"), x2 = ctx.param ("sat_xo2_freq");
-        const auto range = band == 1 ? "< " + hzText (x1) : (band == 2 ? hzText (x1) + juce::String (juce::CharPointer_UTF8 (" \xe2\x80\x93 ")) + hzText (x2) : "> " + hzText (x2));
-        const auto dv = juce::String (ctx.param (params::sat (band, "drive")), 1) + " dB";
-        const int dw = juce::roundToInt (juce::GlyphArrangement::getStringWidth (font (12.5f, true), dv)) + 4;
         g.setColour (colour);
-        g.setFont (font (12.5f, true));
-        g.drawText (dv, h.removeFromRight (dw), juce::Justification::centredRight);
+        g.setFont (semibold (13.0f));
+        g.drawText (params::satBandNames[band - 1], h.removeFromTop (16), juce::Justification::centredLeft, true);
         g.setColour (col::text3);
-        g.setFont (font (12.0f));
-        g.drawText ("Drive", h.removeFromRight (38), juce::Justification::centredRight);
-        g.drawText (range, h, juce::Justification::centredLeft, true);
+        g.setFont (font (11.5f));
+        g.drawText (juce::String (juce::CharPointer_UTF8 (ranges[band - 1])), h, juce::Justification::centredLeft, true);
     }
     /** The band is silent: muted, or another band is soloed (D-032). */
     bool silent() const
     {
         bool anySolo = false;
-        for (int i = 1; i <= 3; ++i)
+        for (int i = 1; i <= params::satBands; ++i)
             anySolo = anySolo || ctx.param (params::sat (i, "solo")) >= 0.5f;
         return ctx.param (params::sat (band, "mute")) >= 0.5f || (anySolo && ctx.param (params::sat (band, "solo")) < 0.5f);
     }
     void resized() override
     {
-        auto r = getLocalBounds().reduced (8, 0).withTrimmedTop (5).withTrimmedBottom (3);
+        auto r = getLocalBounds().reduced (6, 0).withTrimmedTop (5).withTrimmedBottom (3);
         if (horizontal)
         {
             auto sm = r.removeFromRight (24);
@@ -1494,41 +1429,41 @@ public:
             mute.setBounds (sm.withHeight (20).withY (r.getCentreY() + 2));
             r.removeFromRight (6);
             r = r.withSizeKeepingCentre (r.getWidth(), std::min (r.getHeight(), 80));
-            curve.setBounds (r.removeFromLeft (70).withSizeKeepingCentre (70, 70));
-            r.removeFromLeft (10);
-            types.setBounds (r.removeFromLeft (118).withSizeKeepingCentre (118, 80));
+            curve.setBounds (r.removeFromLeft (64).withSizeKeepingCentre (64, 64));
             r.removeFromLeft (8);
-            layoutKnobRow (r.withSizeKeepingCentre (r.getWidth(), 76), { drive, asym, mix, out }, 6);
+            type.setBounds (r.removeFromLeft (112).withSizeKeepingCentre (112, 24));
+            r.removeFromLeft (8);
+            for (auto* k : { drive, asym, mix, out })
+                k->getProperties().set ("w", 56);
+            layoutKnobRow (r.withSizeKeepingCentre (r.getWidth(), 76), { drive, asym, mix, out }, 4);
             return;
         }
-        headArea = r.removeFromTop (18);
+        headArea = r.removeFromTop (30);
         {
             auto hb = headArea;
             mute.setBounds (hb.removeFromRight (22).withSizeKeepingCentre (22, 20));
-            hb.removeFromRight (4);
+            hb.removeFromRight (3);
             solo.setBounds (hb.removeFromRight (22).withSizeKeepingCentre (22, 20));
-            headArea.removeFromRight (56);
+            headArea.removeFromRight (50);
         }
+        r.removeFromTop (3);
+        auto body = r.removeFromTop (54);
+        curve.setBounds (body.removeFromLeft (46).withSizeKeepingCentre (46, 46));
+        body.removeFromLeft (4);
+        drive->setBounds (body.withSizeKeepingCentre (std::min (body.getWidth(), 64), 54));
+        r.removeFromTop (3);
+        type.setBounds (r.removeFromTop (22));
         r.removeFromTop (4);
-        auto body = r.removeFromTop (80);
-        curve.setBounds (body.removeFromLeft (80));
-        body.removeFromLeft (8);
-        drive->setBounds (body.removeFromRight (66).withHeight (76));
-        body.removeFromRight (4);
-        types.setBounds (body.withSizeKeepingCentre (body.getWidth(), 80));
-        r.removeFromTop (2);
         const int w = r.getWidth() / 3;
-        for (int i = 0; i < 3; ++i)
-        {
-            auto* k = i == 0 ? asym : (i == 1 ? mix : out);
-            k->setBounds (r.getX() + i * w + (w - 62) / 2, r.getY(), 62, knobH);
-        }
+        int i = 0;
+        for (auto* k : { asym, mix, out })
+            k->setBounds (r.getX() + (i++) * w, r.getY(), w, std::min (r.getHeight(), (int) k->preferredHeight()));
     }
     Context& ctx;
     int band;
     bool horizontal = false;
     TransferCurve curve;
-    TypeList types;
+    Dropdown type;
     Btn solo { "S", true }, mute { "M", true };
     Knob *drive = nullptr, *asym = nullptr, *mix = nullptr, *out = nullptr;
     juce::Rectangle<int> headArea;
@@ -1537,7 +1472,7 @@ public:
 class SaturationEditor final : public ModuleEditor
 {
 public:
-    explicit SaturationEditor (Context& c) : ModuleEditor (c, 5, "three bands, oversampled, drag a band up or down to set its drive"), graph (c)
+    explicit SaturationEditor (Context& c) : ModuleEditor (c, 5, "six bands like the tonal balance, oversampled, drag a band up or down to set its drive"), graph (c)
     {
         note.setInterceptsMouseClicks (false, false);
         note.draw = [] (juce::Graphics& g, juce::Rectangle<int> r)
@@ -1557,7 +1492,7 @@ public:
         addAndMakeVisible (graph);
         const auto mk = [this] (juce::Component& parent, const juce::String& id, const juce::String& label, const juce::String& tip, juce::Colour colour, bool bi) -> Knob&
         { return makeKnob (parent, id, label, tip, colour, bi); };
-        for (int b = 1; b <= 3; ++b)
+        for (int b = 1; b <= params::satBands; ++b)
         {
             cards.push_back (std::make_unique<SatCard> (ctx, b, mk));
             addAndMakeVisible (*cards.back());
@@ -1570,14 +1505,14 @@ public:
         note.setVisible (! compact);
         bandSel.setVisible (compact);
         addRight (compact ? (juce::Component&) bandSel : (juce::Component&) note, compact ? 190 : 200);
-        for (int b = 0; b < 3; ++b)
+        for (int b = 0; b < params::satBands; ++b)
         {
             cards[(size_t) b]->horizontal = compact;
             cards[(size_t) b]->setVisible (! compact || b == compactBand);
         }
     }
 
-    int naturalHeight (int) const override { return compact ? headH + 8 + 64 + 6 + 90 + 8 : headH + 8 + 78 + 8 + 180 + 8; }
+    int naturalHeight (int) const override { return compact ? headH + 8 + 64 + 6 + 90 + 8 : headH + 8 + 78 + 8 + 192 + 8; }
 
     void update() override
     {
@@ -1586,7 +1521,6 @@ public:
         for (auto& c : cards)
         {
             c->curve.refresh();
-            c->types.repaint();
             c->setAlpha (c->silent() ? 0.55f : 1.0f);
             c->repaint();
         }
@@ -1603,14 +1537,14 @@ public:
         }
         graph.setBounds (r.removeFromTop (78));
         r.removeFromTop (8);
-        const int gap = 8, w = (r.getWidth() - 2 * gap) / 3;
-        for (int b = 0; b < 3; ++b)
-            cards[(size_t) b]->setBounds (r.getX() + b * (w + gap), r.getY(), b == 2 ? r.getRight() - (r.getX() + 2 * (w + gap)) : w, std::min (r.getHeight(), 180));
+        const int n = params::satBands, gap = 6, w = (r.getWidth() - (n - 1) * gap) / n;
+        for (int b = 0; b < n; ++b)
+            cards[(size_t) b]->setBounds (r.getX() + b * (w + gap), r.getY(), b == n - 1 ? r.getRight() - (r.getX() + (n - 1) * (w + gap)) : w, std::min (r.getHeight(), 192));
     }
 
     SatGraph graph;
     Painter note;
-    Segmented bandSel { { "Low", "Mid", "High" } };
+    Segmented bandSel { { "Sub", "Bass", "L-mid", "Mid", "Pres", "Air" } };
     std::vector<std::unique_ptr<SatCard>> cards;
     int compactBand = 0;
 };

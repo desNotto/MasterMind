@@ -155,12 +155,12 @@ std::vector<Spec> build()
 
     // ---- 4.6 Saturation --------------------------------------------------------------------
     v.push_back (b ("sat_on", "Saturation On", false));
-    v.push_back (f ("sat_xo1_freq", "Saturation Low/Mid", 60.0f, 500.0f, 150.0f, Unit::hz, 160.0f));
-    v.push_back (f ("sat_xo2_freq", "Saturation Mid/High", 1000.0f, 10000.0f, 3000.0f, Unit::hz, 3000.0f));
-    for (int band = 1; band <= satBands; ++band)
+    // the crossovers of the three-band Saturation; fixed bands since D-047, kept for old projects
+    v.push_back (f ("sat_xo1_freq", "Saturation Old Low/Mid", 60.0f, 500.0f, 150.0f, Unit::hz, 160.0f));
+    v.push_back (f ("sat_xo2_freq", "Saturation Old Mid/High", 1000.0f, 10000.0f, 3000.0f, Unit::hz, 3000.0f));
+    for (int band = 1; band <= satBandsV1; ++band)
     {
-        static const char* names[] = { "Low", "Mid", "High" };
-        const auto n = juce::String ("Saturation ") + names[band - 1] + " ";
+        const auto n = juce::String ("Saturation ") + satBandNames[band - 1] + " ";
         v.push_back (f (sat (band, "drive"), n + "Drive", 0.0f, 24.0f, 0.0f, Unit::dB));
         v.push_back (c (sat (band, "type"), n + "Type", choice::satType, 0));
         v.push_back (f (sat (band, "bias"), n + "Asymmetry", 0.0f, 100.0f, 0.0f, Unit::percent));
@@ -206,10 +206,9 @@ std::vector<Spec> build()
     v.push_back (c ("out_bits", "Dither Bits", choice::ditherBits, 1));
 
     // ---- added in 0.7 (mockup v12, D-032): appended so that older projects keep their order --
-    for (int band = 1; band <= satBands; ++band)
+    for (int band = 1; band <= satBandsV1; ++band)
     {
-        static const char* names[] = { "Low", "Mid", "High" };
-        const auto n = juce::String ("Saturation ") + names[band - 1] + " ";
+        const auto n = juce::String ("Saturation ") + satBandNames[band - 1] + " ";
         v.push_back (b (sat (band, "solo"), n + "Solo", false));
         v.push_back (b (sat (band, "mute"), n + "Mute", false));
     }
@@ -239,6 +238,18 @@ std::vector<Spec> build()
     v.push_back (f ("lim_density", "Limiter Density", 0.0f, 100.0f, 0.0f, Unit::percent, 0.0f, 1.0f));
     v.push_back (f ("lim_out_clip", "Limiter Output Clip", 0.0f, 6.0f, 0.0f, Unit::dB, 0.0f, 0.1f));
 
+    // D-047: Saturation bands 4-6 (Mid, Presence, Air), appended
+    for (int band = satBandsV1 + 1; band <= satBands; ++band)
+    {
+        const auto n = juce::String ("Saturation ") + satBandNames[band - 1] + " ";
+        v.push_back (f (sat (band, "drive"), n + "Drive", 0.0f, 24.0f, 0.0f, Unit::dB));
+        v.push_back (c (sat (band, "type"), n + "Type", choice::satType, 0));
+        v.push_back (f (sat (band, "bias"), n + "Asymmetry", 0.0f, 100.0f, 0.0f, Unit::percent));
+        v.push_back (f (sat (band, "mix"), n + "Mix", 0.0f, 100.0f, 100.0f, Unit::percent));
+        v.push_back (f (sat (band, "out"), n + "Output", -12.0f, 12.0f, 0.0f, Unit::dB));
+        v.push_back (b (sat (band, "solo"), n + "Solo", false));
+        v.push_back (b (sat (band, "mute"), n + "Mute", false));
+    }
     return v;
 }
 } // namespace
@@ -352,4 +363,28 @@ std::atomic<float>* Raw::get (const juce::String& id) const
     jassert (p != nullptr);
     return p;
 }
+
+bool migrateSaturation (std::map<juce::String, float>& values)
+{
+    if (values.count (sat (1, "drive")) == 0 || values.count (sat (4, "drive")) > 0)
+        return false;
+    const auto get = [&values] (const juce::String& id, float fallback) { const auto it = values.find (id); return it != values.end() ? it->second : fallback; };
+    const float x1 = get ("sat_xo1_freq", 150.0f), x2 = get ("sat_xo2_freq", 3000.0f);
+    static const char* const fields[] = { "drive", "type", "bias", "mix", "out", "solo", "mute" };
+    static const float defaults[] = { 0.0f, 0.0f, 0.0f, 100.0f, 0.0f, 0.0f, 0.0f };
+    // the old three bands, read before anything is overwritten
+    float old[3][7];
+    for (int b = 0; b < 3; ++b)
+        for (int f = 0; f < 7; ++f)
+            old[b][f] = get (sat (b + 1, fields[f]), defaults[f]);
+    static const double centres[satBands] = { 35.0, 95.0, 274.0, 1000.0, 3464.0, 9798.0 };
+    for (int b = 0; b < satBands; ++b)
+    {
+        const int src = centres[b] < x1 ? 0 : (centres[b] < x2 ? 1 : 2);
+        for (int f = 0; f < 7; ++f)
+            values[sat (b + 1, fields[f])] = old[src][f];
+    }
+    return true;
+}
 } // namespace mm::params
+

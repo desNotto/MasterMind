@@ -67,7 +67,7 @@ const std::vector<Dim>& dims()
         v.push_back ({ "st_high_width", 60.0f, 160.0f, 100.0f });
         // a missing low end comes from harmonics rather than energy: Translator and the low band of Saturation
         v.push_back ({ "lem_tr_amount", 0.0f, 60.0f, 0.0f });
-        v.push_back ({ params::sat (1, "drive"), 0.0f, 8.0f, 2.0f });
+        v.push_back ({ params::sat (2, "drive"), 0.0f, 8.0f, 2.0f }); // Bass band (D-047)
         return v;
     }();
     return d;
@@ -173,11 +173,13 @@ ParamMap fixedSetup (const ParamMap& current, double inputLufs)
                           { "st_on", 1.0f }, { "st_guard_on", 1.0f }, { "st_guard_thr", 0.0f }, { "st_ms_balance", 0.0f }, { "st_split_freq", 4500.0f },
                           { "lim_on", 1.0f }, { "out_on", 1.0f }, { "out_gain", 0.0f } })
         p[id] = v;
-    // gentle density: low band Tape 2 dB, mid band Tube 1 dB at 50 %, high band clean (D-031)
-    const float sat[3][4] = { { 2.0f, 1.0f, 100.0f, 0.0f }, { 1.0f, 0.0f, 50.0f, 0.0f }, { 0.0f, 0.0f, 100.0f, 0.0f } };
-    for (int b = 1; b <= 3; ++b)
+    // gentle density (D-031, six bands since D-047): Sub Tape 1 dB, Bass Tape (its drive is a search
+    // knob), Low-mid and Mid Tube 1 dB at 50 %, Presence and Air clean
+    const float sat[params::satBands][4] = { { 1.0f, 1.0f, 100.0f, 0.0f }, { 2.0f, 1.0f, 100.0f, 0.0f }, { 1.0f, 0.0f, 50.0f, 0.0f },
+                                             { 1.0f, 0.0f, 50.0f, 0.0f }, { 0.0f, 0.0f, 100.0f, 0.0f }, { 0.0f, 0.0f, 100.0f, 0.0f } };
+    for (int b = 1; b <= params::satBands; ++b)
     {
-        if (b > 1) // the low band drive is a search knob
+        if (b != 2) // the Bass drive is a search knob
             p[params::sat (b, "drive")] = sat[b - 1][0];
         p[params::sat (b, "type")] = sat[b - 1][1];
         p[params::sat (b, "mix")] = sat[b - 1][2];
@@ -390,7 +392,7 @@ ParamMap Matcher::formula (const ParamMap& start, const Features& f0)
     }
     // what the capped low boost cannot give comes from harmonics (Translator, low band Saturation)
     p["lem_tr_amount"] = (float) std::round (std::clamp (missingLow * 12.0, 0.0, 50.0));
-    p[params::sat (1, "drive")] = (float) std::clamp (std::round ((2.0 + missingLow) * 10.0) / 10.0, 0.0, 8.0);
+    p[params::sat (2, "drive")] = (float) std::clamp (std::round ((2.0 + missingLow) * 10.0) / 10.0, 0.0, 8.0);
     // compression: target gain reduction from the crest factor above the reference (D-031)
     double excess = 0.0;
     if (target.hasCrest)

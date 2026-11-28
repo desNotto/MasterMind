@@ -41,34 +41,36 @@ void Saturation::reset()
     lastRate = 0.0;
     for (auto& c : ch)
     {
-        c.xo1.reset();
-        c.xo2.reset();
-        c.ap2.reset();
+        for (auto& x : c.split)
+            x.reset();
+        for (auto& row : c.ap)
+            for (auto& x : row)
+                x.reset();
         c.dc.reset();
     }
-    for (int b = 0; b < 3; ++b)
+    bool anySolo = false;
+    for (const auto& o : settings.bands)
+        anySolo = anySolo || o.solo;
+    for (int b = 0; b < numBands; ++b)
     {
         const auto& s = settings.bands[(size_t) b];
         ramps[(size_t) b].drive.reset (dbToGain (s.driveDb));
         ramps[(size_t) b].mix.reset (s.mix);
         ramps[(size_t) b].out.reset (dbToGain (s.outDb));
         ramps[(size_t) b].bias.reset (s.bias);
-        bool anySolo = false;
-        for (const auto& o : settings.bands)
-            anySolo = anySolo || o.solo;
         ramps[(size_t) b].level.reset ((s.mute || (anySolo && ! s.solo)) ? 0.0 : 1.0);
     }
 }
 
 void Saturation::updateSplit (double rate) noexcept
 {
-    const double f1 = std::clamp ((double) settings.xo1, 40.0, 600.0);
-    const double f2 = std::clamp ((double) settings.xo2, f1 * 2.0, std::min (12000.0, fs * 0.45));
     for (auto& c : ch)
     {
-        c.xo1.setup (4, rate, f1);
-        c.xo2.setup (4, rate, f2);
-        c.xo2.makeAllpass (c.ap2);
+        for (int k = 0; k < numBands - 1; ++k)
+            c.split[(size_t) k].setup (4, rate, std::min (edges[(size_t) k], rate * 0.45));
+        for (int k = 0; k < numBands - 1; ++k)
+            for (int j = k + 1; j < numBands - 1; ++j)
+                c.split[(size_t) j].makeAllpass (c.ap[(size_t) k][(size_t) j]);
         c.dc.setCoeffs (Coeffs::highpass1 (rate, 5.0));
     }
     lastRate = rate;
@@ -84,8 +86,11 @@ void Saturation::process (float* left, float* right, int numSamples) noexcept
         updateSplit (rate);
 
     const int n = (int) upBlock.getNumSamples();
-    double peaks[3] = { 0.0, 0.0, 0.0 };
-    for (int b = 0; b < 3; ++b)
+    std::array<double, numBands> peaks {};
+    bool anySolo = false;
+    for (const auto& s : settings.bands)
+        anySolo = anySolo || s.solo;
+    for (int b = 0; b < numBands; ++b)
     {
         const auto& s = settings.bands[(size_t) b];
         // drive and output are compensated so that a low-level signal keeps unity gain at mix 100 %
@@ -93,53 +98,57 @@ void Saturation::process (float* left, float* right, int numSamples) noexcept
         ramps[(size_t) b].mix.setTarget (s.mix, n);
         ramps[(size_t) b].out.setTarget (dbToGain (s.outDb), n);
         ramps[(size_t) b].bias.setTarget (s.bias * 0.5, n);
-    }
-    bool anySolo = false;
-    for (const auto& s : settings.bands)
-        anySolo = anySolo || s.solo;
-    for (int b = 0; b < 3; ++b)
-    {
-        const auto& s = settings.bands[(size_t) b];
         ramps[(size_t) b].level.setTarget ((s.mute || (anySolo && ! s.solo)) ? 0.0 : 1.0, n);
     }
 
     for (int i = 0; i < n; ++i)
     {
-        double drive[3], mixv[3], out[3], bias[3], level[3];
-        for (int b = 0; b < 3; ++b)
+        std::array<double, numBands> drive {}, mixv {}, out {}, bias {}, level {};
+        for (int b = 0; b < numBands; ++b)
         {
-            drive[b] = ramps[(size_t) b].drive.next();
-            mixv[b] = ramps[(size_t) b].mix.next();
-            out[b] = ramps[(size_t) b].out.next();
-            bias[b] = ramps[(size_t) b].bias.next();
-            level[b] = ramps[(size_t) b].level.next();
+            drive[(size_t) b] = ramps[(size_t) b].drive.next();
+            mixv[(size_t) b] = ramps[(size_t) b].mix.next();
+            out[(size_t) b] = ramps[(size_t) b].out.next();
+            bias[(size_t) b] = ramps[(size_t) b].bias.next();
+            level[(size_t) b] = ramps[(size_t) b].level.next();
         }
         for (int c = 0; c < 2; ++c)
         {
             auto& st = ch[(size_t) c];
             float* d = upBlock.getChannelPointer ((size_t) c);
-            double lo, rest, mid, hi;
-            st.xo1.process (d[i], lo, rest);
-            st.xo2.process (rest, mid, hi);
-            lo = st.ap2.process (lo);
-            const double bands[3] = { lo, mid, hi };
+            // split cascade: band k is the low output of split k, the last band the rest; every band
+            // passes the allpasses of the later splits, so the bands sum to an allpass of the input
+            std::array<double, numBands> bands {};
+            double rest = d[i];
+            for (int k = 0; k < numBands - 1; ++k)
+            {
+                double lo, hi;
+                st.split[(size_t) k].process (rest, lo, hi);
+                bands[(size_t) k] = lo;
+                rest = hi;
+            }
+            bands[numBands - 1] = rest;
+            for (int k = 0; k < numBands - 2; ++k)
+                for (int j = k + 1; j < numBands - 1; ++j)
+                    bands[(size_t) k] = st.ap[(size_t) k][(size_t) j].process (bands[(size_t) k]);
             double sum = 0.0;
-            for (int b = 0; b < 3; ++b)
+            for (int b = 0; b < numBands; ++b)
             {
                 const int type = settings.bands[(size_t) b].type;
-                const double x = bands[b];
-                peaks[b] = std::max (peaks[b], std::abs (x));
+                const double x = bands[(size_t) b];
+                peaks[(size_t) b] = std::max (peaks[(size_t) b], std::abs (x));
                 // drive into the shaper, then divide by the drive so the level stays comparable
-                const double wet = shape (type, x * drive[b], bias[b]) / drive[b];
-                sum += (x + mixv[b] * (wet - x)) * out[b] * level[b];
+                const double wet = shape (type, x * drive[(size_t) b], bias[(size_t) b]) / drive[(size_t) b];
+                sum += (x + mixv[(size_t) b] * (wet - x)) * out[(size_t) b] * level[(size_t) b];
             }
             d[i] = (float) st.dc.process (sum);
         }
     }
     os.down (block);
-    for (int b = 0; b < 3; ++b)
-        peakMeters[(size_t) b].set ((float) peaks[b]);
+    for (int b = 0; b < numBands; ++b)
+        peakMeters[(size_t) b].set ((float) peaks[(size_t) b]);
 }
+
 
 // ---- Stereo ------------------------------------------------------------------------------------------
 void StereoStage::prepare (const Context& ctx)

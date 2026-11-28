@@ -240,23 +240,23 @@ Generated from `Source/state/Parameters.cpp`. The IDs are frozen since M1 (spec 
 | `bus_link` | Bus Comp Stereo Link | 0% to 100% | 100% | yes |
 | `bus_makeup_auto` | Bus Comp Auto Makeup | Off / On | Off | yes |
 | `sat_on` | Saturation On | Off / On | Off | yes |
-| `sat_xo1_freq` | Saturation Low/Mid | 60 Hz to 500 Hz | 150 Hz | yes |
-| `sat_xo2_freq` | Saturation Mid/High | 1.00 kHz to 10.0 kHz | 3.00 kHz | yes |
-| `sat_b1_drive` | Saturation Low Drive | 0.0 dB to 24.0 dB | 0.0 dB | yes |
-| `sat_b1_type` | Saturation Low Type | Tube, Tape, Transformer, Diode | Tube | yes |
-| `sat_b1_bias` | Saturation Low Asymmetry | 0% to 100% | 0% | yes |
-| `sat_b1_mix` | Saturation Low Mix | 0% to 100% | 100% | yes |
-| `sat_b1_out` | Saturation Low Output | −12.0 dB to 12.0 dB | 0.0 dB | yes |
-| `sat_b2_drive` | Saturation Mid Drive | 0.0 dB to 24.0 dB | 0.0 dB | yes |
-| `sat_b2_type` | Saturation Mid Type | Tube, Tape, Transformer, Diode | Tube | yes |
-| `sat_b2_bias` | Saturation Mid Asymmetry | 0% to 100% | 0% | yes |
-| `sat_b2_mix` | Saturation Mid Mix | 0% to 100% | 100% | yes |
-| `sat_b2_out` | Saturation Mid Output | −12.0 dB to 12.0 dB | 0.0 dB | yes |
-| `sat_b3_drive` | Saturation High Drive | 0.0 dB to 24.0 dB | 0.0 dB | yes |
-| `sat_b3_type` | Saturation High Type | Tube, Tape, Transformer, Diode | Tube | yes |
-| `sat_b3_bias` | Saturation High Asymmetry | 0% to 100% | 0% | yes |
-| `sat_b3_mix` | Saturation High Mix | 0% to 100% | 100% | yes |
-| `sat_b3_out` | Saturation High Output | −12.0 dB to 12.0 dB | 0.0 dB | yes |
+| `sat_xo1_freq` | Saturation Old Low/Mid | 60 Hz to 500 Hz | 150 Hz | yes |
+| `sat_xo2_freq` | Saturation Old Mid/High | 1.00 kHz to 10.0 kHz | 3.00 kHz | yes |
+| `sat_b1_drive` | Saturation Sub Drive | 0.0 dB to 24.0 dB | 0.0 dB | yes |
+| `sat_b1_type` | Saturation Sub Type | Tube, Tape, Transformer, Diode | Tube | yes |
+| `sat_b1_bias` | Saturation Sub Asymmetry | 0% to 100% | 0% | yes |
+| `sat_b1_mix` | Saturation Sub Mix | 0% to 100% | 100% | yes |
+| `sat_b1_out` | Saturation Sub Output | −12.0 dB to 12.0 dB | 0.0 dB | yes |
+| `sat_b2_drive` | Saturation Bass Drive | 0.0 dB to 24.0 dB | 0.0 dB | yes |
+| `sat_b2_type` | Saturation Bass Type | Tube, Tape, Transformer, Diode | Tube | yes |
+| `sat_b2_bias` | Saturation Bass Asymmetry | 0% to 100% | 0% | yes |
+| `sat_b2_mix` | Saturation Bass Mix | 0% to 100% | 100% | yes |
+| `sat_b2_out` | Saturation Bass Output | −12.0 dB to 12.0 dB | 0.0 dB | yes |
+| `sat_b3_drive` | Saturation Low-mid Drive | 0.0 dB to 24.0 dB | 0.0 dB | yes |
+| `sat_b3_type` | Saturation Low-mid Type | Tube, Tape, Transformer, Diode | Tube | yes |
+| `sat_b3_bias` | Saturation Low-mid Asymmetry | 0% to 100% | 0% | yes |
+| `sat_b3_mix` | Saturation Low-mid Mix | 0% to 100% | 100% | yes |
+| `sat_b3_out` | Saturation Low-mid Output | −12.0 dB to 12.0 dB | 0.0 dB | yes |
 | `st_on` | Stereo On | Off / On | Off | yes |
 | `st_split_freq` | Stereo Mid/High Split | 1.00 kHz to 10.0 kHz | 4.00 kHz | yes |
 | `st_mid_width` | Mid Width | 0% to 200% | 100% | yes |
@@ -283,12 +283,12 @@ Generated from `Source/state/Parameters.cpp`. The IDs are frozen since M1 (spec 
 | `out_gain` | Output Gain | −12.0 dB to 12.0 dB | 0.0 dB | yes |
 | `out_dither` | Dither | Off, TPDF, Noise-shaped | Off | yes |
 | `out_bits` | Dither Bits | 16 bit, 24 bit | 24 bit | yes |
-| `sat_b1_solo` | Saturation Low Solo | Off / On | Off | yes |
-| `sat_b1_mute` | Saturation Low Mute | Off / On | Off | yes |
-| `sat_b2_solo` | Saturation Mid Solo | Off / On | Off | yes |
-| `sat_b2_mute` | Saturation Mid Mute | Off / On | Off | yes |
-| `sat_b3_solo` | Saturation High Solo | Off / On | Off | yes |
-| `sat_b3_mute` | Saturation High Mute | Off / On | Off | yes |
+| `sat_b1_solo` | Saturation Sub Solo | Off / On | Off | yes |
+| `sat_b1_mute` | Saturation Sub Mute | Off / On | Off | yes |
+| `sat_b2_solo` | Saturation Bass Solo | Off / On | Off | yes |
+| `sat_b2_mute` | Saturation Bass Mute | Off / On | Off | yes |
+| `sat_b3_solo` | Saturation Low-mid Solo | Off / On | Off | yes |
+| `sat_b3_mute` | Saturation Low-mid Mute | Off / On | Off | yes |
 | `clip_drive` | Clipper Drive | 0.0 dB to 24.0 dB | 0.0 dB | yes |
 | `out_target` | Output Target Loudness | −30.0 LUFS to −3.0 LUFS | −9.0 LUFS | no |
 | `infl_input` | Inflator Input | −6.0 dB to 12.0 dB | 0.0 dB | yes |
@@ -306,3 +306,24 @@ Generated from `Source/state/Parameters.cpp`. The IDs are frozen since M1 (spec 
 | `lim_soften` | Limiter Soften | 0% to 100% | 0% | yes |
 | `lim_density` | Limiter Density | 0% to 100% | 0% | yes |
 | `lim_out_clip` | Limiter Output Clip | 0.0 dB to 6.0 dB | 0.0 dB | yes |
+| `sat_b4_drive` | Saturation Mid Drive | 0.0 dB to 24.0 dB | 0.0 dB | yes |
+| `sat_b4_type` | Saturation Mid Type | Tube, Tape, Transformer, Diode | Tube | yes |
+| `sat_b4_bias` | Saturation Mid Asymmetry | 0% to 100% | 0% | yes |
+| `sat_b4_mix` | Saturation Mid Mix | 0% to 100% | 100% | yes |
+| `sat_b4_out` | Saturation Mid Output | −12.0 dB to 12.0 dB | 0.0 dB | yes |
+| `sat_b4_solo` | Saturation Mid Solo | Off / On | Off | yes |
+| `sat_b4_mute` | Saturation Mid Mute | Off / On | Off | yes |
+| `sat_b5_drive` | Saturation Presence Drive | 0.0 dB to 24.0 dB | 0.0 dB | yes |
+| `sat_b5_type` | Saturation Presence Type | Tube, Tape, Transformer, Diode | Tube | yes |
+| `sat_b5_bias` | Saturation Presence Asymmetry | 0% to 100% | 0% | yes |
+| `sat_b5_mix` | Saturation Presence Mix | 0% to 100% | 100% | yes |
+| `sat_b5_out` | Saturation Presence Output | −12.0 dB to 12.0 dB | 0.0 dB | yes |
+| `sat_b5_solo` | Saturation Presence Solo | Off / On | Off | yes |
+| `sat_b5_mute` | Saturation Presence Mute | Off / On | Off | yes |
+| `sat_b6_drive` | Saturation Air Drive | 0.0 dB to 24.0 dB | 0.0 dB | yes |
+| `sat_b6_type` | Saturation Air Type | Tube, Tape, Transformer, Diode | Tube | yes |
+| `sat_b6_bias` | Saturation Air Asymmetry | 0% to 100% | 0% | yes |
+| `sat_b6_mix` | Saturation Air Mix | 0% to 100% | 100% | yes |
+| `sat_b6_out` | Saturation Air Output | −12.0 dB to 12.0 dB | 0.0 dB | yes |
+| `sat_b6_solo` | Saturation Air Solo | Off / On | Off | yes |
+| `sat_b6_mute` | Saturation Air Mute | Off / On | Off | yes |

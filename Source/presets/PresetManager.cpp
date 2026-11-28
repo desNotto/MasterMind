@@ -100,6 +100,7 @@ bool PresetManager::fromJson (const juce::String& json, std::map<juce::String, f
         for (const auto& prop : obj->getProperties())
             if (params::find (prop.name.toString()) != nullptr) // unknown IDs are ignored
                 values[prop.name.toString()] = (float) (double) prop.value;
+    params::migrateSaturation (values); // three-band Saturation presets (D-047)
     return true;
 }
 

@@ -967,3 +967,58 @@ TEST_CASE ("Limiter CPU benchmark", "[.bench]")
     std::printf ("bank only: %.2f %% of real time\n", ms / 200.0);
 }
 
+
+TEST_CASE ("Saturation: six bands sum to an allpass of the input at Drive 0", "[dsp][saturation]")
+{
+    // D-047: the band split at 60, 150, 500, 2000 and 6000 Hz keeps the level of a sweep of tones
+    const double fs = 48000.0;
+    Host h;
+    h.set ("sat_on", 1.0f);
+    for (int b = 1; b <= mm::params::satBands; ++b)
+        h.set (mm::params::sat (b, "drive"), 0.0f);
+    h.chain.prepare (fs, 512, false);
+    for (double f : { 40.0, 60.0, 100.0, 150.0, 300.0, 500.0, 1000.0, 2000.0, 4000.0, 6000.0, 12000.0 })
+    {
+        const int n = (int) fs;
+        juce::AudioBuffer<float> b (2, n);
+        for (int i = 0; i < n; ++i)
+        {
+            const float v = (float) (0.25 * std::sin (twoPi * f * i / fs));
+            b.setSample (0, i, v);
+            b.setSample (1, i, v);
+        }
+        mmtest::runChain (h, b, 512);
+        const double a = toneAmp (b, fs, f, n / 2, n / 4);
+        INFO ("tone " << f << " Hz: " << 20.0 * std::log10 (a / 0.25) << " dB");
+        CHECK (std::abs (20.0 * std::log10 (a / 0.25)) < 0.25); // DC filter and oversampling: about 0.15 dB at the ends
+    }
+}
+
+TEST_CASE ("Saturation: a three-band project gets six bands with the old settings", "[state][saturation]")
+{
+    // D-047: Low (below 150 Hz) -> Sub and Bass, Mid -> Low-mid and Mid, High (above 3 kHz) -> Presence and Air
+    std::map<juce::String, float> v;
+    v["sat_xo1_freq"] = 150.0f;
+    v["sat_xo2_freq"] = 3000.0f;
+    for (int b = 1; b <= 3; ++b)
+    {
+        v[mm::params::sat (b, "drive")] = 2.0f * (float) b;
+        v[mm::params::sat (b, "type")] = (float) b;
+        v[mm::params::sat (b, "mute")] = b == 3 ? 1.0f : 0.0f;
+    }
+    REQUIRE (mm::params::migrateSaturation (v));
+    const float want[6] = { 2.0f, 2.0f, 4.0f, 4.0f, 6.0f, 6.0f };
+    for (int b = 1; b <= 6; ++b)
+    {
+        CHECK (v[mm::params::sat (b, "drive")] == want[b - 1]);
+        CHECK (v[mm::params::sat (b, "type")] == want[b - 1] / 2.0f);
+        CHECK (v[mm::params::sat (b, "mute")] == (b >= 5 ? 1.0f : 0.0f));
+    }
+    // a six-band state is left alone
+    CHECK_FALSE (mm::params::migrateSaturation (v));
+    // moved crossovers move the mapping: xo1 at 300 Hz puts Low-mid (274 Hz) into the old Low band
+    std::map<juce::String, float> w { { "sat_xo1_freq", 300.0f }, { "sat_xo2_freq", 3000.0f }, { "sat_b1_drive", 5.0f }, { "sat_b2_drive", 1.0f } };
+    REQUIRE (mm::params::migrateSaturation (w));
+    CHECK (w[mm::params::sat (3, "drive")] == 5.0f);
+    CHECK (w[mm::params::sat (4, "drive")] == 1.0f);
+}

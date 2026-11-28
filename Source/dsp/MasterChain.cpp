@@ -34,9 +34,8 @@ struct ParamPtrsImpl
     std::array<MbBand, 5> mbb {};
     A monoOn, monoFreq, monoSlope, monoAmount, rotOn, rotFreq, rotAngle, trOn, trAmount, trMix;
     A busModel, busThr, busRatio, busAtt, busRel, busRelAuto, busKnee, busSc, busMix, busDetect, busLink, busMakeup;
-    A satXo1, satXo2;
     struct SatBand { A drive, type, bias, mix, out, solo, mute; };
-    std::array<SatBand, 3> satb {};
+    std::array<SatBand, params::satBands> satb {};
     A stSplit, stMid, stHigh, stBal, stGuard, stGuardThr;
     A inflInput, inflEffect, inflCurve, inflOutput, inflClip, inflSplit;
     A limLook, limRel, limRelAuto, limMode, limDrive, limCeil, limLink, limTrans, limBands, limAGain, limASpeed, limATrans, limClip, limLevel, limSoft, limDens, limOutClip;
@@ -122,9 +121,7 @@ ParamPtrsImpl resolve (const params::Raw& r)
     p.busDetect = r.get ("bus_detect");
     p.busLink = r.get ("bus_link");
     p.busMakeup = r.get ("bus_makeup_auto");
-    p.satXo1 = r.get ("sat_xo1_freq");
-    p.satXo2 = r.get ("sat_xo2_freq");
-    for (int b = 1; b <= 3; ++b)
+    for (int b = 1; b <= params::satBands; ++b)
     {
         auto& s = p.satb[(size_t) b - 1];
         s.drive = r.get (sat (b, "drive"));
@@ -324,9 +321,7 @@ void MasterChain::readSettings() noexcept
     bc.autoMakeup = bv (q.busMakeup);
 
     auto& sa = satModule.settings;
-    sa.xo1 = v (q.satXo1);
-    sa.xo2 = v (q.satXo2);
-    for (int b = 0; b < 3; ++b)
+    for (int b = 0; b < params::satBands; ++b)
     {
         const auto& s = q.satb[(size_t) b];
         auto& d = sa.bands[(size_t) b];

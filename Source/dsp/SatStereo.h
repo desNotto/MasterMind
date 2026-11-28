@@ -18,10 +18,12 @@ public:
         float bias = 0.0f, mix = 1.0f, outDb = 0.0f;
         bool solo = false, mute = false; // D-032: listen to one band, remove a band
     };
+    /** Six bands at the limits of the tonal balance (D-047): Sub, Bass, Low-mid, Mid, Presence, Air. */
+    static constexpr int numBands = 6;
+    static constexpr std::array<double, numBands - 1> edges { 60.0, 150.0, 500.0, 2000.0, 6000.0 };
     struct Settings
     {
-        float xo1 = 150.0f, xo2 = 3000.0f;
-        std::array<Band, 3> bands;
+        std::array<Band, numBands> bands;
     } settings;
 
     void prepare (const Context& ctx) override;
@@ -45,8 +47,9 @@ private:
     double lastRate = 0.0;
     struct Channel
     {
-        LinkwitzRiley xo1, xo2;
-        Cascade ap2; // compensation of the low band for xo2
+        std::array<LinkwitzRiley, numBands - 1> split;
+        // allpass compensation: band k passes the allpass of every later split j > k
+        std::array<std::array<Cascade, numBands - 1>, numBands - 1> ap;
         Biquad dc;
     };
     std::array<Channel, 2> ch;
@@ -54,8 +57,8 @@ private:
     {
         Ramp drive, mix, out, bias, level; // level: solo/mute gain, ramped (no clicks)
     };
-    std::array<BandRamp, 3> ramps;
-    std::array<Meter, 3> peakMeters;
+    std::array<BandRamp, numBands> ramps;
+    std::array<Meter, numBands> peakMeters;
 };
 
 /** 4.7 Width per band, mid/side balance and the correlation guard. */
