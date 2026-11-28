@@ -208,3 +208,30 @@ The user asked to skip the mockup step for this change set and to go straight to
 - **Library preview**: a play/pause button in every row of the References table plays the song through B without a slot (`ReferenceLibrary::preview`); the loudness curve comes from the analysis cache when the song is analysed. Selecting a slot ends the preview.
 - **Auto match progress**: a bar along the bottom of the strip and a percentage before the status: finished steps plus the running 4 s measurement, never moving back; green when finished, grey after Stop. The strip is 42 px high (was 36).
 - **Bypass** greys out the window below the top bar and shows "BYPASS: you hear the input" in the footer; the controls stay usable. **The MONITOR ON badge and the red window frame (spec 6.0 rule 3) are removed** at the user's request; B is visible through the player and the B button, band listen through its button.
+
+## D-037 Spectral limiter after Newfangled Elevate (proposed, mockup v16, 2026-11-28)
+
+The user asked to rebuild the per-band ("pinpoint") behaviour of Newfangled Audio Elevate in our Limiter. User decisions (2026-11-28): a linear-phase filter bank (larger latency accepted), the core features first, a mockup before the code.
+
+**What Elevate does** (its user guide, Rev. 5, and public statements of its developer; no code or binary was examined):
+- An auditory filter bank splits the signal into up to 26 triangular bands on the Mel scale (critical bands of hearing); the band count is selectable, 1 band turns it into a standard look-ahead limiter. The bands reconstruct the input exactly; the developer describes FIR filters with perfect reconstruction. Users report about 100 ms of latency.
+- Limiter: Gain (drive), Speed (combined attack and release), Ceiling, an optimally soft knee for fast release with low distortion, optional true-peak mode.
+- Adaptive Gain: the number of dB by which the gain of one band may differ from the others, so the loudest bands near the limit get more reduction.
+- Adaptive Speed: adapts attack, release and look-ahead per band; reduces pumping, breathing and perceived distortion. The developer attributes low-end artifacts to intermodulation and cures them with slower speed.
+- Per-band gain (EQ inside the limiter), Transient Emphasis after the limiter (0 to 200 % per band, Adaptive Transient smooths it across neighbouring bands), then a spectral clipper (optimal soft curve, up to 12 dB drive, a frequency-domain correction against the dull sound of a clipped full-band signal) that also enforces the ceiling.
+
+**Our design** (Limiter module, `Source/dsp/SpectralLimiter.*`):
+1. Drive.
+2. Filter bank: B = 26 (or 16, 8) triangular bands with centres from 30 Hz to 16 kHz, closer in the low end than Mel so that kick and bass fall into different bands. Each band is a linear-phase FIR designed from the same window; the triangles sum to one, so the bands sum exactly to the input delayed by half the FIR length. FIR length 4096 at 44.1/48 kHz, scaled with the sample rate (about 43 ms); uniformly partitioned FFT convolution (512-sample partitions, juce::dsp::FFT), one input FFT shared by all bands. Total latency about 55 ms; it does not change when the limiter is switched on or off.
+3. Band gain computer per band and channel (stereo link as now): a fast peak envelope and a slow (about 1 s) program envelope. A band whose peak rises above its own program level more than the other bands gets extra reduction: offset = -min(Adaptive Gain, excess above the energy-weighted mean excess), applied only while the limiter is near the limit (scaled by the broadband reduction). With Adaptive Gain at 0 every band has the same gain. The raw input is available half the FIR length earlier than the band signals, so this stage looks ahead for free.
+4. Adaptive Speed: hold and release of every band scale with the band period (a hold of at least one period of the band centre, low bands slower, high bands faster); 0 % uses the same time constants in every band (the D-036 values of the mode).
+5. Sum of the gained bands -> the D-036 broadband gain computer on the sum (hold, fast and slow stages, look-ahead, cascaded averages) as the shared part of the reduction.
+6. Transients (existing `lim_transient`, new meaning): per-band attack emphasis = ratio of a fast to a slow envelope, up to +6 dB, after the limiting; Adaptive Trans smooths it across neighbouring bands (0 % = one emphasis for all bands).
+7. A soft clipper (the Clipper's soft curve, 4x oversampled) catches the emphasised attacks at the ceiling, then the D-036 true-peak brickwall stage guarantees the ceiling (unlike Elevate's original sample-peak behaviour).
+8. Not in the core step: per-band EQ and per-band transient sliders (Elevate's Limiter/EQ and Transient pages) and the frequency-domain clipper correction.
+
+**Parameters** (appended, IDs frozen afterwards): `lim_bands` (Classic, 8, 16, 26; default 26; not automatable, it changes the latency), `lim_adapt_gain` (0 to 12 dB, default 6), `lim_adapt_speed` (0 to 100 %, default 70), `lim_adapt_trans` (0 to 100 %, default 50). `lim_transient` keeps its ID and range and becomes the attack emphasis. Classic is the D-036 limiter with its 2 ms look-ahead.
+
+**Deviation from the spec**: with the defaults the plugin latency grows from 270 samples to about 2,900 samples at 48 kHz (spec section 10 quotes 270). Classic restores the old latency.
+
+**Tests planned**: perfect reconstruction of the filter bank (bands sum to the delayed input within -100 dB); the ceiling test with every band count; the D-036 THD and IMD tests; a pinpoint test: a 60 Hz kick burst plus a steady 1 kHz tone, the 1 kHz tone is pumped at least 3 dB less with Adaptive Gain 6 dB than with 0 dB; CPU at 26 bands reported.
